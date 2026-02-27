@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { Check, Trash2 } from 'lucide-react-native';
+import { Check, Trash2, MapPin } from 'lucide-react-native';
 import { Colors } from '../constants/Colors';
 import { Task } from '../types/task';
 import { format } from 'date-fns';
@@ -39,6 +39,12 @@ export default function TaskItem({ task, onToggle, onDelete }: TaskItemProps) {
             <Text style={styles.dateText}>
               {format(new Date(task.date), 'EEE, MMM d')}
             </Text>
+          </View>
+        )}
+        {task.locationReminder && (
+          <View style={styles.locationContainer}>
+            <MapPin size={12} color={Colors.light.primary} />
+            <Text style={styles.locationText}>Remind near {task.locationReminder.locationName}</Text>
           </View>
         )}
       </View>
@@ -113,6 +119,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
     backgroundColor: '#1D4ED8',
+  },
+  locationContainer: {
+    marginTop: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  locationText: {
+    fontSize: 12,
+    fontFamily: 'Inter_400Regular',
+    color: '#9CA3AF',
   },
   deleteBtn: {
     padding: 8,

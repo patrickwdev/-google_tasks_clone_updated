@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
-import { Task, TaskContextType } from '../types/task';
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { Task, TaskContextType, TaskLocationReminder } from '../types/task';
+import { syncGeofencesForTasks } from '../lib/geofencing';
 
 const TaskContext = createContext<TaskContextType | undefined>(undefined);
 
@@ -30,7 +31,12 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
     },
   ]);
 
-  const addTask = (title: string, details?: string, date?: Date) => {
+  const addTask = (
+    title: string,
+    details?: string,
+    date?: Date,
+    locationReminder?: TaskLocationReminder
+  ) => {
     const newTask: Task = {
       id: Date.now().toString(),
       title,
@@ -38,9 +44,15 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
       date,
       isCompleted: false,
       listId: 'default',
+      locationReminder,
     };
     setTasks((prev) => [newTask, ...prev]);
   };
+
+  // Sync geofences whenever tasks with location reminders change
+  useEffect(() => {
+    syncGeofencesForTasks(tasks).catch(() => {});
+  }, [tasks]);
 
   const toggleTask = (id: string) => {
     setTasks((prev) =>

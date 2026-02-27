@@ -8,6 +8,7 @@ import {
   Inter_600SemiBold,
   Inter_700Bold,
 } from '@expo-google-fonts/inter';
+import '../lib/geofencing'; // Registers geofencing task and notification handler
 import { AuthProvider } from '../context/AuthContext';
 import { TaskProvider } from '../context/TaskContext';
 import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,8 @@ import {
   KeyboardAvoidingView,
   Platform,
   TouchableWithoutFeedback,
+  Switch,
+  FlatList,
 } from 'react-native';
 import {
   Calendar,
@@ -18,13 +20,23 @@ import {
   ShoppingBag,
   Heart,
   Plus,
+  MapPin,
 } from 'lucide-react-native';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import { Calendar as DateCalendar } from 'react-native-calendars';
+import type { TaskLocationReminder } from '../types/task';
+import * as Location from 'expo-location';
+import { geocodePlaceName, requestLocationReminderPermissions } from '../lib/geofencing';
+import {
+  isGooglePlacesConfigured,
+  fetchAutocompleteSuggestions,
+  fetchPlaceDetails,
+  type PlaceSuggestion,
+} from '../lib/googlePlaces';
 
 interface AddTaskModalProps {
   visible: boolean;
   onClose: () => void;
-  onAdd: (title: string, details?: string, date?: Date) => void;
+  onAdd: (title: string, details?: string, date?: Date, locationReminder?: TaskLocationReminder) => void;
 }
 
 export default function AddTaskModal({ visible, onClose, onAdd }: AddTaskModalProps) {
@@ -32,30 +44,203 @@ export default function AddTaskModal({ visible, onClose, onAdd }: AddTaskModalPr
   const [details, setDetails] = useState('');
   const [date, setDate] = useState<Date | undefined>(undefined);
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const [priority, setPriority] = useState<'low' | 'medium' | 'high'>('medium');
+  const [remindNearLocation, setRemindNearLocation] = useState(false);
+  const [locationPlaceName, setLocationPlaceName] = useState('');
+  const [selectedPlaceCoords, setSelectedPlaceCoords] = useState<{ name: string; latitude: number; longitude: number } | null>(null);
+  const [suggestions, setSuggestions] = useState<PlaceSuggestion[]>([]);
+  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [isGeocoding, setIsGeocoding] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
+  const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
   const [category, setCategory] = useState<'Work' | 'Personal' | 'Shopping' | 'Health' | 'New'>('Work');
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [notifyWithinFeet, setNotifyWithinFeet] = useState(500);
+  const googlePlacesEnabled = isGooglePlacesConfigured();
 
-  const handleSave = () => {
-    if (title.trim()) {
-      onAdd(title, details, date);
-      resetForm();
-      onClose();
+  const DISTANCE_OPTIONS_FEET = [10, 20, 50, 100, 250, 500];
+
+  // Get current location when "When I'm nearby" is turned on (to bias suggestions near user)
+  useEffect(() => {
+    if (!remindNearLocation) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        let { status } = await Location.getForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          const { status: requested } = await Location.requestForegroundPermissionsAsync();
+          status = requested;
+        }
+        if (status !== 'granted' || cancelled) return;
+        const pos = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+          maxAge: 60000,
+          timeout: 15000,
+        });
+        if (!cancelled) setUserLocation({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
+      } catch {
+        // Ignore; suggestions will work without bias
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [remindNearLocation]);
+
+  // Helper: get location for this request (use cached or fetch now)
+  const getLocationForSearch = async (): Promise<{ latitude: number; longitude: number } | undefined> => {
+    if (userLocation) return userLocation;
+    try {
+      const { status } = await Location.getForegroundPermissionsAsync();
+      if (status !== 'granted') return undefined;
+      const pos = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+        maxAge: 60000,
+        timeout: 10000,
+      });
+      const coords = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+      setUserLocation(coords);
+      return coords;
+    } catch {
+      return undefined;
     }
+  };
+
+  // Debounced Google Places autocomplete (with location bias when available)
+  useEffect(() => {
+    if (!remindNearLocation || !googlePlacesEnabled || locationPlaceName.trim().length < 2) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      setSuggestionsError(null);
+      return;
+    }
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(async () => {
+      setIsLoadingSuggestions(true);
+      setShowSuggestions(true);
+      setSuggestionsError(null);
+      const location = await getLocationForSearch();
+      const result = await fetchAutocompleteSuggestions(locationPlaceName, {
+        location: location ?? undefined,
+      });
+      setSuggestions(result.suggestions);
+      if (result.error) setSuggestionsError(result.error);
+      setIsLoadingSuggestions(false);
+      debounceRef.current = null;
+    }, 300);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [remindNearLocation, locationPlaceName, googlePlacesEnabled, userLocation]);
+
+  const handleSelectSuggestion = async (suggestion: PlaceSuggestion) => {
+    setShowSuggestions(false);
+    setSuggestions([]);
+    setIsGeocoding(true);
+    setLocationError(null);
+    // Use suggestion.text (place + address) for display; fetch details for coordinates
+    const fullText = suggestion.text?.trim() || suggestion.placeId;
+    const details = await fetchPlaceDetails(suggestion.placeId);
+    setIsGeocoding(false);
+    if (details) {
+      setLocationPlaceName(fullText);
+      setSelectedPlaceCoords({
+        name: fullText,
+        latitude: details.latitude,
+        longitude: details.longitude,
+      });
+    } else {
+      setLocationError('Could not load place details.');
+    }
+  };
+
+  const handleSave = async () => {
+    if (!title.trim()) return;
+    setLocationError(null);
+    let locationReminder: TaskLocationReminder | undefined;
+    if (remindNearLocation && locationPlaceName.trim()) {
+      if (selectedPlaceCoords) {
+        locationReminder = {
+          locationName: selectedPlaceCoords.name,
+          latitude: selectedPlaceCoords.latitude,
+          longitude: selectedPlaceCoords.longitude,
+          radiusFeet: notifyWithinFeet,
+        };
+      } else {
+        setIsGeocoding(true);
+        const coords = await geocodePlaceName(locationPlaceName.trim());
+        setIsGeocoding(false);
+        if (coords) {
+          locationReminder = {
+            locationName: locationPlaceName.trim(),
+            latitude: coords.latitude,
+            longitude: coords.longitude,
+            radiusFeet: notifyWithinFeet,
+          };
+        } else {
+          setLocationError('Could not find that place. Try a full address or landmark.');
+          return;
+        }
+      }
+    }
+    onAdd(title, details, date, locationReminder);
+    resetForm();
+    onClose();
   };
 
   const resetForm = () => {
     setTitle('');
     setDetails('');
     setDate(undefined);
-    setPriority('medium');
+    setRemindNearLocation(false);
+    setLocationPlaceName('');
+    setSelectedPlaceCoords(null);
+    setNotifyWithinFeet(500);
+    setSuggestions([]);
+    setShowSuggestions(false);
+    setLocationError(null);
+    setSuggestionsError(null);
     setCategory('Work');
   };
 
-  const onDateChange = (event: any, selectedDate?: Date) => {
-    setShowDatePicker(false);
-    if (selectedDate) {
-      setDate(selectedDate);
-    }
+  const handleRemindNearToggle = (value: boolean) => {
+    setRemindNearLocation(value);
+    setLocationError(null);
+    if (value && Platform.OS !== 'web') requestLocationReminderPermissions().catch(() => {});
+  };
+
+  const formatDateString = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const markedDates = date
+    ? { [formatDateString(date)]: { selected: true, selectedColor: '#2563EB', selectedTextColor: '#FFFFFF' } }
+    : {};
+
+  const handleDayPress = (day: { dateString: string }) => {
+    const [y, m, dayNum] = day.dateString.split('-').map(Number);
+    setDate(new Date(y, m - 1, dayNum));
+  };
+
+  const calendarTheme = {
+    backgroundColor: 'transparent',
+    calendarBackground: 'transparent',
+    textSectionTitleColor: '#9CA3AF',
+    selectedDayBackgroundColor: '#2563EB',
+    selectedDayTextColor: '#FFFFFF',
+    todayTextColor: '#60A5FA',
+    dayTextColor: '#E5E7EB',
+    textDisabledColor: '#4B5563',
+    arrowColor: '#60A5FA',
+    monthTextColor: '#E5E7EB',
+    textDayFontFamily: 'Inter_500Medium',
+    textMonthFontFamily: 'Inter_600SemiBold',
+    textDayHeaderFontFamily: 'Inter_500Medium',
+    textDayFontSize: 16,
+    textMonthFontSize: 16,
+    textDayHeaderFontSize: 12,
   };
 
   return (
@@ -111,9 +296,13 @@ export default function AddTaskModal({ visible, onClose, onAdd }: AddTaskModalPr
             </View>
           </View>
 
-          {/* Due date */}
+          {/* Due date - tap anywhere to open calendar */}
           <View style={styles.section}>
-            <View style={styles.sectionCard}>
+            <TouchableOpacity
+              style={styles.sectionCard}
+              onPress={() => setShowDatePicker(true)}
+              activeOpacity={0.8}
+            >
               <View style={styles.sectionCardHeader}>
                 <View style={styles.sectionCardIconWrapper}>
                   <Calendar size={18} color="#BFDBFE" />
@@ -123,76 +312,101 @@ export default function AddTaskModal({ visible, onClose, onAdd }: AddTaskModalPr
                   <Text style={styles.sectionCardSubtitle}>
                     {date
                       ? date.toLocaleDateString()
-                      : 'Pick a time for your task'}
+                      : 'Tap to pick a date for your task'}
                   </Text>
                 </View>
               </View>
-
-              <TouchableOpacity
-                style={styles.sectionCardRight}
-                onPress={() => setShowDatePicker(true)}
-                activeOpacity={0.8}
-              >
+              <View style={styles.sectionCardRight}>
                 <Text style={styles.sectionCardRightText}>
-                  {date ? 'Change' : 'Today'}
+                  {date ? 'Change' : 'Select'}
                 </Text>
-              </TouchableOpacity>
-            </View>
+              </View>
+            </TouchableOpacity>
           </View>
 
-          {/* Priority */}
+          {/* Location reminder — notify when near a place */}
           <View style={styles.section}>
-            <Text style={styles.sectionLabel}>Set Priority</Text>
-            <View style={styles.priorityRow}>
-              <TouchableOpacity
-                style={[
-                  styles.priorityChip,
-                  priority === 'low' && styles.priorityChipActive,
-                ]}
-                onPress={() => setPriority('low')}
-              >
-                <Text
-                  style={[
-                    styles.priorityText,
-                    priority === 'low' && styles.priorityTextActive,
-                  ]}
-                >
-                  Low
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.priorityChip,
-                  priority === 'medium' && styles.priorityChipActive,
-                ]}
-                onPress={() => setPriority('medium')}
-              >
-                <Text
-                  style={[
-                    styles.priorityText,
-                    priority === 'medium' && styles.priorityTextActive,
-                  ]}
-                >
-                  Medium
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.priorityChip,
-                  priority === 'high' && styles.priorityChipActive,
-                ]}
-                onPress={() => setPriority('high')}
-              >
-                <Text
-                  style={[
-                    styles.priorityText,
-                    priority === 'high' && styles.priorityTextActive,
-                  ]}
-                >
-                  High
-                </Text>
-              </TouchableOpacity>
+            <View style={styles.sectionCard}>
+              <View style={styles.sectionCardHeader}>
+                <View style={styles.sectionCardIconWrapper}>
+                  <MapPin size={18} color="#BFDBFE" />
+                </View>
+                <View style={styles.sectionCardTextWrapper}>
+                  <Text style={styles.sectionCardTitle}>When I'm nearby</Text>
+                  <Text style={styles.sectionCardSubtitle}>
+                    {remindNearLocation ? 'Notify me near the place below' : 'Notify me when I arrive at a location'}
+                  </Text>
+                </View>
+              </View>
+              <Switch
+                value={remindNearLocation}
+                onValueChange={handleRemindNearToggle}
+                trackColor={{ false: '#374151', true: '#2563EB' }}
+                thumbColor={remindNearLocation ? '#93C5FD' : '#9CA3AF'}
+              />
             </View>
+            {remindNearLocation && (
+              <View style={styles.locationInputWrap}>
+                <TextInput
+                  style={[styles.inputCard, styles.locationInput]}
+                  placeholder={googlePlacesEnabled ? "Search for a place or address…" : "e.g. Whole Foods, 123 Main St"}
+                  placeholderTextColor="#6B7280"
+                  value={locationPlaceName}
+                  onChangeText={(t) => {
+                    setLocationPlaceName(t);
+                    setLocationError(null);
+                    setSelectedPlaceCoords(null);
+                  }}
+                  onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
+                  onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                  editable={!isGeocoding}
+                />
+                {showSuggestions && suggestions.length > 0 && (
+                  <View style={[styles.suggestionsDropdown, Platform.OS === 'web' && styles.suggestionsDropdownWeb]}>
+                    <FlatList
+                      data={suggestions}
+                      keyExtractor={(item) => item.placeId}
+                      keyboardShouldPersistTaps="handled"
+                      style={styles.suggestionsList}
+                      renderItem={({ item }) => (
+                        <TouchableOpacity
+                          style={styles.suggestionItem}
+                          onPress={() => handleSelectSuggestion(item)}
+                          activeOpacity={0.7}
+                        >
+                          <MapPin size={14} color="#9CA3AF" style={styles.suggestionIcon} />
+                          <Text style={styles.suggestionText} numberOfLines={2}>{item.text}</Text>
+                        </TouchableOpacity>
+                      )}
+                    />
+                  </View>
+                )}
+                {isLoadingSuggestions && <Text style={styles.locationHint}>Searching places…</Text>}
+                {suggestionsError && (
+                  <Text style={styles.locationError}>
+                    {suggestionsError}
+                    {Platform.OS === 'web' && !suggestionsError.includes('Enable it by visiting') && ' On web, add your site (e.g. http://localhost:8081) to the API key’s HTTP referrers in Google Cloud Console.'}
+                  </Text>
+                )}
+                {locationError ? <Text style={styles.locationError}>{locationError}</Text> : null}
+                {isGeocoding && !isLoadingSuggestions ? <Text style={styles.locationHint}>Finding location…</Text> : null}
+                <Text style={styles.distanceLabel}>Notify when within</Text>
+                <View style={styles.distanceRow}>
+                  {DISTANCE_OPTIONS_FEET.map((ft) => (
+                    <TouchableOpacity
+                      key={ft}
+                      style={[styles.distanceChip, notifyWithinFeet === ft && styles.distanceChipActive]}
+                      onPress={() => setNotifyWithinFeet(ft)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[styles.distanceChipText, notifyWithinFeet === ft && styles.distanceChipTextActive]}>
+                        {ft} ft
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            )}
           </View>
 
           {/* Category */}
@@ -321,10 +535,10 @@ export default function AddTaskModal({ visible, onClose, onAdd }: AddTaskModalPr
           <TouchableOpacity
             style={[
               styles.saveButton,
-              !title.trim() && styles.saveButtonDisabled,
+              (!title.trim() || isGeocoding) && styles.saveButtonDisabled,
             ]}
             onPress={handleSave}
-            disabled={!title.trim()}
+            disabled={!title.trim() || isGeocoding}
             activeOpacity={0.9}
           >
             <Text
@@ -339,14 +553,53 @@ export default function AddTaskModal({ visible, onClose, onAdd }: AddTaskModalPr
         </View>
       </KeyboardAvoidingView>
 
-      {showDatePicker && (
-        <DateTimePicker
-          value={date || new Date()}
-          mode="date"
-          display="default"
-          onChange={onDateChange}
-        />
-      )}
+      {/* Date picker popup */}
+      <Modal
+        visible={showDatePicker}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowDatePicker(false)}
+      >
+        <TouchableOpacity
+          style={styles.datePickerOverlay}
+          activeOpacity={1}
+          onPress={() => setShowDatePicker(false)}
+        >
+          <TouchableOpacity
+            style={styles.datePickerPopup}
+            activeOpacity={1}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View style={styles.datePickerPopupHeader}>
+              <Text style={styles.datePickerPopupTitle}>Pick a date</Text>
+              <TouchableOpacity
+                onPress={() => setShowDatePicker(false)}
+                style={styles.datePickerCloseBtn}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <X size={20} color="#9CA3AF" />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.datePickerContent}>
+              <Text style={styles.datePickerSectionLabel}>Select a date</Text>
+              <DateCalendar
+                current={date ? formatDateString(date) : undefined}
+                initialDate={date ? formatDateString(date) : formatDateString(new Date())}
+                onDayPress={handleDayPress}
+                markedDates={markedDates}
+                theme={calendarTheme}
+                style={styles.dateCalendar}
+              />
+              <TouchableOpacity
+                style={styles.datePickerDone}
+                onPress={() => setShowDatePicker(false)}
+              >
+                <Text style={styles.datePickerDoneText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </Modal>
   );
 }
@@ -476,31 +729,90 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_500Medium',
     color: '#60A5FA',
   },
-  priorityRow: {
+  locationInputWrap: {
+    marginTop: 10,
+    marginLeft: 4,
+  },
+  locationInput: {
+    minHeight: 44,
+    color: '#FFFFFF',
+  },
+  distanceLabel: {
+    fontSize: 13,
+    fontFamily: 'Inter_500Medium',
+    color: '#9CA3AF',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  distanceRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
   },
-  priorityChip: {
-    flex: 1,
-    marginRight: 8,
+  distanceChip: {
+    paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: 14,
-    backgroundColor: '#020617',
+    borderRadius: 999,
+    backgroundColor: '#0F172A',
     borderWidth: 1,
-    borderColor: '#111827',
-    alignItems: 'center',
+    borderColor: '#1F2937',
   },
-  priorityChipActive: {
-    backgroundColor: '#1F2937',
-    borderColor: '#1D4ED8',
+  distanceChipActive: {
+    backgroundColor: '#1D4ED8',
+    borderColor: '#2563EB',
   },
-  priorityText: {
+  distanceChipText: {
     fontSize: 13,
     fontFamily: 'Inter_500Medium',
     color: '#9CA3AF',
   },
-  priorityTextActive: {
+  distanceChipTextActive: {
+    color: '#EFF6FF',
+  },
+  locationError: {
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+    color: '#F87171',
+    marginTop: 6,
+  },
+  locationHint: {
+    fontSize: 12,
+    fontFamily: 'Inter_400Regular',
+    color: '#9CA3AF',
+    marginTop: 6,
+  },
+  suggestionsDropdown: {
+    marginTop: 6,
+    maxHeight: 200,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#1F2937',
+    backgroundColor: '#0F172A',
+    overflow: 'hidden',
+  },
+  suggestionsDropdownWeb: {
+    zIndex: 9999,
+    position: 'relative',
+    elevation: 9999,
+  },
+  suggestionsList: {
+    maxHeight: 200,
+  },
+  suggestionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1E293B',
+  },
+  suggestionIcon: {
+    marginRight: 10,
+  },
+  suggestionText: {
+    flex: 1,
+    fontSize: 14,
+    fontFamily: 'Inter_500Medium',
     color: '#E5E7EB',
   },
   categoryRow: {
@@ -556,5 +868,70 @@ const styles = StyleSheet.create({
   },
   saveButtonTextDisabled: {
     color: '#6B7280',
+  },
+  datePickerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.75)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  datePickerPopup: {
+    backgroundColor: '#020617',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#1F2937',
+    width: '100%',
+    maxWidth: 340,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 24,
+    elevation: 24,
+  },
+  datePickerPopupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1F2937',
+  },
+  datePickerPopupTitle: {
+    fontSize: 17,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#E5E7EB',
+  },
+  datePickerCloseBtn: {
+    padding: 4,
+  },
+  datePickerContent: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 20,
+  },
+  datePickerSectionLabel: {
+    fontSize: 14,
+    fontFamily: 'Inter_500Medium',
+    color: '#9CA3AF',
+    marginBottom: 12,
+  },
+  dateCalendar: {
+    marginBottom: 16,
+  },
+  datePickerDone: {
+    marginTop: 16,
+    paddingVertical: 14,
+    borderRadius: 999,
+    backgroundColor: '#2563EB',
+    alignItems: 'center',
+  },
+  datePickerDoneText: {
+    color: '#F9FAFB',
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
   },
 });
