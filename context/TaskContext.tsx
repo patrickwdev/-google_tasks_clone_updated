@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { Task, TaskContextType, TaskLocationReminder } from '../types/task';
+import { Task, TaskContextType, TaskLocationReminder, SubTask } from '../types/task';
 import { syncGeofencesForTasks } from '../lib/geofencing';
 
 const TaskContext = createContext<TaskContextType | undefined>(undefined);
@@ -35,7 +35,8 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
     title: string,
     details?: string,
     date?: Date,
-    locationReminder?: TaskLocationReminder
+    locationReminder?: TaskLocationReminder,
+    subtasks?: SubTask[]
   ) => {
     const newTask: Task = {
       id: Date.now().toString(),
@@ -45,6 +46,7 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
       isCompleted: false,
       listId: 'default',
       locationReminder,
+      subtasks: subtasks?.length ? subtasks : undefined,
     };
     setTasks((prev) => [newTask, ...prev]);
   };
@@ -62,12 +64,75 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
     );
   };
 
+  const toggleSubtask = (taskId: string, subtaskId: string) => {
+    setTasks((prev) =>
+      prev.map((task) => {
+        if (task.id !== taskId || !task.subtasks) return task;
+        return {
+          ...task,
+          subtasks: task.subtasks.map((st) =>
+            st.id === subtaskId ? { ...st, isCompleted: !st.isCompleted } : st
+          ),
+        };
+      })
+    );
+  };
+
   const deleteTask = (id: string) => {
     setTasks((prev) => prev.filter((task) => task.id !== id));
   };
 
+  const updateTaskDate = (taskId: string, date: Date) => {
+    setTasks((prev) =>
+      prev.map((task) => (task.id === taskId ? { ...task, date } : task))
+    );
+  };
+
+  const updateTaskLocationReminder = (taskId: string, locationReminder: TaskLocationReminder | undefined) => {
+    setTasks((prev) =>
+      prev.map((task) => (task.id === taskId ? { ...task, locationReminder } : task))
+    );
+  };
+
+  const addSubtask = (taskId: string, title: string) => {
+    const newSubtask: SubTask = {
+      id: Date.now().toString(),
+      title: title.trim(),
+      isCompleted: false,
+    };
+    setTasks((prev) =>
+      prev.map((task) => {
+        if (task.id !== taskId) return task;
+        const subtasks = [...(task.subtasks || []), newSubtask];
+        return { ...task, subtasks };
+      })
+    );
+  };
+
+  const deleteSubtask = (taskId: string, subtaskId: string) => {
+    setTasks((prev) =>
+      prev.map((task) => {
+        if (task.id !== taskId || !task.subtasks) return task;
+        const subtasks = task.subtasks.filter((st) => st.id !== subtaskId);
+        return { ...task, subtasks: subtasks.length ? subtasks : undefined };
+      })
+    );
+  };
+
   return (
-    <TaskContext.Provider value={{ tasks, addTask, toggleTask, deleteTask }}>
+    <TaskContext.Provider
+      value={{
+        tasks,
+        addTask,
+        toggleTask,
+        toggleSubtask,
+        deleteTask,
+        updateTaskDate,
+        updateTaskLocationReminder,
+        addSubtask,
+        deleteSubtask,
+      }}
+    >
       {children}
     </TaskContext.Provider>
   );

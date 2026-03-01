@@ -191,6 +191,8 @@ export default function CalendarScreen() {
                 task={item}
                 onToggle={toggleTask}
                 onDelete={deleteTask}
+                onPress={(t) => router.push(t.isCompleted ? `/task/completed/${t.id}` : `/task/${t.id}`)}
+                onEdit={(t) => router.push(t.isCompleted ? `/task/completed/${t.id}` : `/task/${t.id}`)}
               />
             ))
           )}

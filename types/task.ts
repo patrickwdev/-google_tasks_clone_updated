@@ -7,6 +7,13 @@ export interface TaskLocationReminder {
   radiusFeet?: number;
 }
 
+/** A single sub-task under a task */
+export interface SubTask {
+  id: string;
+  title: string;
+  isCompleted: boolean;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -16,6 +23,8 @@ export interface Task {
   listId: string; // For future multiple lists support
   /** When set, user gets a notification when arriving near this location */
   locationReminder?: TaskLocationReminder;
+  /** Optional list of sub-tasks */
+  subtasks?: SubTask[];
 }
 
 export type TaskContextType = {
@@ -24,8 +33,14 @@ export type TaskContextType = {
     title: string,
     details?: string,
     date?: Date,
-    locationReminder?: TaskLocationReminder
+    locationReminder?: TaskLocationReminder,
+    subtasks?: SubTask[]
   ) => void;
   toggleTask: (id: string) => void;
+  toggleSubtask: (taskId: string, subtaskId: string) => void;
   deleteTask: (id: string) => void;
+  updateTaskDate: (taskId: string, date: Date) => void;
+  updateTaskLocationReminder: (taskId: string, locationReminder: TaskLocationReminder | undefined) => void;
+  addSubtask: (taskId: string, title: string) => void;
+  deleteSubtask: (taskId: string, subtaskId: string) => void;
 };

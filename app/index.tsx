@@ -3,7 +3,7 @@ import {
   StyleSheet,
   View,
   Text,
-  FlatList,
+  SectionList,
   TouchableOpacity,
   SafeAreaView,
   ActivityIndicator,
@@ -17,12 +17,14 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react-native';
 import { Colors } from '../constants/Colors';
 import { useTasks } from '../context/TaskContext';
 import TaskItem from '../components/TaskItem';
 import AddTaskModal from '../components/AddTaskModal';
-import { format, addDays, startOfWeek } from 'date-fns';
+import { format, addDays, startOfWeek, isSameDay, startOfDay } from 'date-fns';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../context/AuthContext';
 import { useEffect } from 'react';
@@ -31,7 +33,13 @@ import { supabase } from '../lib/supabase';
 export default function TasksScreen() {
   const { tasks, addTask, toggleTask, deleteTask } = useTasks();
   const { user, isLoading: authLoading } = useAuth();
+  const today = useMemo(() => startOfDay(new Date()), []);
+  const [viewWeekStart, setViewWeekStart] = useState<Date>(() =>
+    startOfWeek(today, { weekStartsOn: 1 })
+  );
+  const [selectedDate, setSelectedDate] = useState<Date>(() => new Date());
   const [isModalVisible, setIsModalVisible] = useState(false);
+  const [completedSectionExpanded, setCompletedSectionExpanded] = useState(true);
   const router = useRouter();
 
   useEffect(() => {
@@ -49,15 +57,71 @@ export default function TasksScreen() {
     }
   }, [authLoading, user, router]);
 
-  const today = new Date();
   const incompleteCount = useMemo(
     () => tasks.filter((t) => !t.isCompleted).length,
     [tasks]
   );
   const weekDays = useMemo(() => {
-    const start = startOfWeek(today, { weekStartsOn: 1 });
-    return Array.from({ length: 7 }, (_, index) => addDays(start, index));
-  }, [today]);
+    return Array.from({ length: 7 }, (_, index) => addDays(viewWeekStart, index));
+  }, [viewWeekStart]);
+
+  // All hooks must run before any early return (Rules of Hooks)
+  const tasksForSelectedDay = useMemo(() => {
+    return tasks.filter((t) => {
+      if (!t.date) return false;
+      const taskDate = t.date instanceof Date ? t.date : new Date(t.date);
+      return isSameDay(taskDate, selectedDate);
+    });
+  }, [tasks, selectedDate]);
+
+  const incompleteForSelectedDay = useMemo(
+    () => tasksForSelectedDay.filter((t) => !t.isCompleted).length,
+    [tasksForSelectedDay]
+  );
+
+  const incompleteTasks = useMemo(() => {
+    return tasksForSelectedDay
+      .filter((t) => !t.isCompleted)
+      .sort((a, b) => (b.date?.getTime() || 0) - (a.date?.getTime() || 0));
+  }, [tasksForSelectedDay]);
+
+  const completedTasks = useMemo(() => {
+    return tasksForSelectedDay
+      .filter((t) => t.isCompleted)
+      .sort((a, b) => (b.date?.getTime() || 0) - (a.date?.getTime() || 0));
+  }, [tasksForSelectedDay]);
+
+  const listSections = useMemo(() => {
+    const dayTitle = isSameDay(selectedDate, today)
+      ? "Today's Tasks"
+      : format(selectedDate, "EEEE, MMM d") + "'s Tasks";
+    const sections: { title: string; data: typeof incompleteTasks }[] = [
+      { title: dayTitle, data: incompleteTasks },
+    ];
+    if (completedTasks.length > 0) {
+      sections.push({ title: 'Completed', data: [] });
+    }
+    return sections;
+  }, [selectedDate, today, incompleteTasks, completedTasks]);
+
+  const goToPreviousWeek = () => {
+    const prevWeekStart = addDays(viewWeekStart, -7);
+    setViewWeekStart(prevWeekStart);
+    const dayOfWeek = selectedDate.getDay();
+    const isSunday = dayOfWeek === 0;
+    const mondayOffset = isSunday ? 6 : dayOfWeek - 1;
+    setSelectedDate(addDays(prevWeekStart, mondayOffset));
+  };
+  const goToNextWeek = () => {
+    const nextWeekStart = addDays(viewWeekStart, 7);
+    setViewWeekStart(nextWeekStart);
+    const dayOfWeek = selectedDate.getDay();
+    const isSunday = dayOfWeek === 0;
+    const mondayOffset = isSunday ? 6 : dayOfWeek - 1;
+    setSelectedDate(addDays(nextWeekStart, mondayOffset));
+  };
+
+  const isShowingToday = isSameDay(selectedDate, today);
 
   if (authLoading || !user) {
     return (
@@ -66,14 +130,6 @@ export default function TasksScreen() {
       </View>
     );
   }
-
-  // Sort tasks: Incomplete first, then by date
-  const sortedTasks = [...tasks].sort((a, b) => {
-    if (a.isCompleted === b.isCompleted) {
-      return (b.date?.getTime() || 0) - (a.date?.getTime() || 0);
-    }
-    return a.isCompleted ? 1 : -1;
-  });
 
   return (
     <SafeAreaView style={styles.container}>
@@ -99,8 +155,9 @@ export default function TasksScreen() {
             Good morning, {user ? user.fullName.trim().split(/\s+/)[0] || user.fullName : '...'}
           </Text>
           <Text style={styles.subGreetingText}>
-            You have {incompleteCount} task
-            {incompleteCount === 1 ? '' : 's'} to complete today.
+            {isShowingToday
+              ? `You have ${incompleteCount} task${incompleteCount === 1 ? '' : 's'} to complete today.`
+              : `You have ${incompleteForSelectedDay} task${incompleteForSelectedDay === 1 ? '' : 's'} for this day.`}
           </Text>
         </View>
       </View>
@@ -108,29 +165,38 @@ export default function TasksScreen() {
       {/* Month & week strip */}
       <View style={styles.dateSection}>
         <View style={styles.monthRow}>
-          <TouchableOpacity activeOpacity={0.7}>
+          <TouchableOpacity onPress={goToPreviousWeek} activeOpacity={0.7}>
             <ChevronLeft size={18} color="#9CA3AF" />
           </TouchableOpacity>
-          <Text style={styles.monthText}>{format(today, 'MMMM yyyy')}</Text>
-          <TouchableOpacity activeOpacity={0.7}>
+          <Text style={styles.monthText}>{format(viewWeekStart, 'MMMM yyyy')}</Text>
+          <TouchableOpacity onPress={goToNextWeek} activeOpacity={0.7}>
             <ChevronRight size={18} color="#9CA3AF" />
           </TouchableOpacity>
         </View>
 
         <View style={styles.weekRow}>
           {weekDays.map((day) => {
-            const isToday =
-              day.getDate() === today.getDate() &&
-              day.getMonth() === today.getMonth() &&
-              day.getFullYear() === today.getFullYear();
+            const isToday = isSameDay(day, today);
+            const isSelected = isSameDay(day, selectedDate);
 
             return (
-              <View
+              <TouchableOpacity
                 key={day.toISOString()}
-                style={[styles.dayPill, isToday && styles.dayPillActive]}
+                style={[
+                  styles.dayPill,
+                  isToday && styles.dayPillActive,
+                  isSelected && !isToday && styles.dayPillSelected,
+                ]}
+                onPress={() => setSelectedDate(day)}
+                activeOpacity={0.7}
+                hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
               >
                 <Text
-                  style={[styles.dayName, isToday && styles.dayNameActive]}
+                  style={[
+                    styles.dayName,
+                    isToday && styles.dayNameActive,
+                    isSelected && !isToday && styles.dayNameSelected,
+                  ]}
                 >
                   {format(day, 'EEE').toUpperCase()}
                 </Text>
@@ -138,41 +204,103 @@ export default function TasksScreen() {
                   style={[
                     styles.dayNumber,
                     isToday && styles.dayNumberActive,
+                    isSelected && !isToday && styles.dayNumberSelected,
                   ]}
                 >
                   {format(day, 'd')}
                 </Text>
-              </View>
+              </TouchableOpacity>
             );
           })}
         </View>
       </View>
 
-      <View style={styles.sectionHeaderRow}>
-        <Text style={styles.sectionHeaderText}>Today's Tasks</Text>
-      </View>
-
-      {/* Task List */}
-      <FlatList
-        data={sortedTasks}
+      {/* Task list: Today's Tasks (incomplete) + Completed section */}
+      <SectionList
+        sections={listSections}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
+        stickySectionHeadersEnabled={false}
+        renderSectionHeader={({ section }) => {
+          if (section.title === 'Completed') return null;
+          return (
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionHeaderText}>{section.title}</Text>
+            </View>
+          );
+        }}
+        renderSectionFooter={({ section }) => {
+          if (section.title === 'Completed') {
+            const isCollapsible = completedTasks.length > 1;
+            const showList =
+              completedTasks.length <= 1 || completedSectionExpanded;
+            return (
+              <View style={styles.sectionHeaderRow}>
+                <View style={styles.completedSectionCard}>
+                  {isCollapsible ? (
+                    <TouchableOpacity
+                      style={styles.completedHeaderRow}
+                      onPress={() =>
+                        setCompletedSectionExpanded((prev) => !prev)
+                      }
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.sectionHeaderText}>
+                        Completed ({completedTasks.length})
+                      </Text>
+                      {completedSectionExpanded ? (
+                        <ChevronUp size={20} color="#9CA3AF" />
+                      ) : (
+                        <ChevronDown size={20} color="#9CA3AF" />
+                      )}
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={styles.completedHeaderRow}>
+                      <Text style={styles.sectionHeaderText}>Completed</Text>
+                    </View>
+                  )}
+                  {showList && (
+                    <View style={styles.completedSectionBody}>
+                      {completedTasks.length === 0 ? (
+                        <View style={styles.completedEmpty}>
+                          <Text style={styles.completedEmptyText}>
+                            No completed tasks for this day
+                          </Text>
+                        </View>
+                      ) : (
+                        completedTasks.map((item) => (
+                          <TaskItem
+                            key={item.id}
+                            task={item}
+                            onToggle={toggleTask}
+                            onDelete={deleteTask}
+                            onPress={(t) => router.push(t.isCompleted ? `/task/completed/${t.id}` : `/task/${t.id}`)}
+                            onEdit={(t) => router.push(t.isCompleted ? `/task/completed/${t.id}` : `/task/${t.id}`)}
+                          />
+                        ))
+                      )}
+                    </View>
+                  )}
+                </View>
+              </View>
+            );
+          }
+          if (section.data.length > 0) return null;
+          return (
+            <View style={styles.emptyStateSimple}>
+              <Text style={styles.emptyTextSimple}>No tasks for this day</Text>
+            </View>
+          );
+        }}
         renderItem={({ item }) => (
           <TaskItem
             task={item}
             onToggle={toggleTask}
             onDelete={deleteTask}
+            onPress={(t) => router.push(t.isCompleted ? `/task/completed/${t.id}` : `/task/${t.id}`)}
+            onEdit={(t) => router.push(t.isCompleted ? `/task/completed/${t.id}` : `/task/${t.id}`)}
           />
         )}
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <View style={styles.emptyCircle}>
-              <Plus size={40} color="#4B5563" />
-            </View>
-            <Text style={styles.emptyText}>No tasks yet</Text>
-            <Text style={styles.emptySubText}>Add a task to get started</Text>
-          </View>
-        }
       />
 
       {/* Bottom navigation & FAB */}
@@ -325,6 +453,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#1D4ED8',
     borderColor: '#2563EB',
   },
+  dayPillSelected: {
+    backgroundColor: '#1E3A5F',
+    borderColor: '#2563EB',
+  },
   dayName: {
     fontSize: 10,
     fontFamily: 'Inter_500Medium',
@@ -334,6 +466,9 @@ const styles = StyleSheet.create({
   dayNameActive: {
     color: '#DBEAFE',
   },
+  dayNameSelected: {
+    color: '#93C5FD',
+  },
   dayNumber: {
     fontSize: 16,
     fontFamily: 'Inter_600SemiBold',
@@ -342,7 +477,13 @@ const styles = StyleSheet.create({
   dayNumberActive: {
     color: '#EFF6FF',
   },
+  dayNumberSelected: {
+    color: '#93C5FD',
+  },
   sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 24,
     paddingTop: 20,
     paddingBottom: 8,
@@ -352,36 +493,48 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_600SemiBold',
     color: '#E5E7EB',
   },
+  completedSectionCard: {
+    alignSelf: 'center',
+    width: '100%',
+    maxWidth: 480,
+    backgroundColor: '#020617',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#111827',
+    overflow: 'hidden',
+  },
+  completedHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  completedSectionBody: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    paddingTop: 4,
+  },
   listContent: {
     paddingTop: 8,
     paddingHorizontal: 16,
     paddingBottom: 140,
     flexGrow: 1,
   },
-  emptyState: {
-    flex: 1,
+  emptyStateSimple: {
+    paddingTop: 48,
     alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 120,
   },
-  emptyCircle: {
-    width: 110,
-    height: 110,
-    borderRadius: 55,
-    marginBottom: 24,
-    backgroundColor: '#020617',
-    borderWidth: 1,
-    borderColor: '#111827',
-    alignItems: 'center',
-    justifyContent: 'center',
+  emptyTextSimple: {
+    fontSize: 15,
+    fontFamily: 'Inter_500Medium',
+    color: '#6B7280',
   },
-  emptyText: {
-    fontSize: 18,
-    fontFamily: 'Inter_600SemiBold',
-    color: '#E5E7EB',
-    marginBottom: 6,
+  completedEmpty: {
+    paddingVertical: 16,
+    paddingHorizontal: 16,
   },
-  emptySubText: {
+  completedEmptyText: {
     fontSize: 14,
     fontFamily: 'Inter_400Regular',
     color: '#6B7280',

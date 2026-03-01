@@ -59,6 +59,8 @@ export default function RootLayout() {
         <Stack.Screen name="create-account" />
         <Stack.Screen name="categories" />
         <Stack.Screen name="calendar" />
+        <Stack.Screen name="task/[id]" />
+        <Stack.Screen name="task/completed/[id]" />
         <Stack.Screen name="settings" />
         </Stack>
         <StatusBar style="dark" backgroundColor="transparent" />
