@@ -19,7 +19,6 @@ import {
   User,
   ShoppingBag,
   Heart,
-  Plus,
   MapPin,
   ListChecks,
   Trash2,
@@ -559,27 +558,6 @@ export default function AddTaskModal({ visible, onClose, onAdd }: AddTaskModalPr
                   ]}
                 >
                   Health
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.categoryChip,
-                  category === 'New' && styles.categoryChipActive,
-                ]}
-                onPress={() => setCategory('New')}
-              >
-                <Plus
-                  size={16}
-                  color={category === 'New' ? '#EFF6FF' : '#9CA3AF'}
-                />
-                <Text
-                  style={[
-                    styles.categoryText,
-                    category === 'New' && styles.categoryTextActive,
-                  ]}
-                >
-                  New
                 </Text>
               </TouchableOpacity>
             </View>
