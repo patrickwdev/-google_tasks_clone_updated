@@ -17,7 +17,7 @@ import EditTaskPanel from '../../components/EditTaskPanel';
 export default function TaskDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { tasks, toggleTask, toggleSubtask, deleteTask } = useTasks();
+  const { tasks, toggleTask, toggleSubtask, deleteTask, categoryLabels } = useTasks();
   const [editPanelVisible, setEditPanelVisible] = useState(false);
 
   const task = id ? tasks.find((t) => t.id === id) : undefined;
@@ -107,7 +107,9 @@ export default function TaskDetailScreen() {
               <Folder size={18} color="#9CA3AF" />
               <Text style={styles.sectionLabel}>Category</Text>
             </View>
-            <Text style={styles.categoryText}>{task.category}</Text>
+            <Text style={styles.categoryText}>
+              {categoryLabels[task.category] ?? task.category}
+            </Text>
           </View>
         ) : null}
 

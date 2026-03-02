@@ -15,16 +15,13 @@ import {
 import {
   Calendar,
   X,
-  Briefcase,
-  User,
-  ShoppingBag,
-  Heart,
   MapPin,
   ListChecks,
   Trash2,
 } from 'lucide-react-native';
 import { Calendar as DateCalendar } from 'react-native-calendars';
 import type { TaskLocationReminder, SubTask, TaskCategory } from '../types/task';
+import { useTasks } from '../context/TaskContext';
 import * as Location from 'expo-location';
 import { geocodePlaceName, requestLocationReminderPermissions } from '../lib/geofencing';
 import {
@@ -37,10 +34,18 @@ import {
 interface AddTaskModalProps {
   visible: boolean;
   onClose: () => void;
-  onAdd: (title: string, details?: string, date?: Date, locationReminder?: TaskLocationReminder, subtasks?: SubTask[], category?: TaskCategory) => void;
+  onAdd: (
+    title: string,
+    details?: string,
+    date?: Date,
+    locationReminder?: TaskLocationReminder,
+    subtasks?: SubTask[],
+    category?: TaskCategory | string,
+  ) => void;
 }
 
 export default function AddTaskModal({ visible, onClose, onAdd }: AddTaskModalProps) {
+  const { categoryLabels, hiddenCategories, customCategories, getCategoryLabel } = useTasks();
   const [title, setTitle] = useState('');
   const [details, setDetails] = useState('');
   const [date, setDate] = useState<Date | undefined>(undefined);
@@ -54,7 +59,7 @@ export default function AddTaskModal({ visible, onClose, onAdd }: AddTaskModalPr
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
-  const [category, setCategory] = useState<'Work' | 'Personal' | 'Shopping' | 'Health' | 'New'>('Work');
+  const [category, setCategory] = useState<TaskCategory | string | undefined>('Work');
   const [subtasks, setSubtasks] = useState<{ id: string; title: string }[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -187,7 +192,14 @@ export default function AddTaskModal({ visible, onClose, onAdd }: AddTaskModalPr
     const subTaskList: SubTask[] = subtasks
       .filter((s) => s.title.trim())
       .map((s) => ({ id: s.id, title: s.title.trim(), isCompleted: false }));
-    onAdd(title, details, date, locationReminder, subTaskList.length ? subTaskList : undefined, category);
+    onAdd(
+      title,
+      details,
+      date,
+      locationReminder,
+      subTaskList.length ? subTaskList : undefined,
+      category,
+    );
     resetForm();
     onClose();
   };
@@ -476,90 +488,104 @@ export default function AddTaskModal({ visible, onClose, onAdd }: AddTaskModalPr
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>Category</Text>
             <View style={styles.categoryRow}>
-              <TouchableOpacity
-                style={[
-                  styles.categoryChip,
-                  category === 'Work' && styles.categoryChipActive,
-                ]}
-                onPress={() => setCategory('Work')}
-              >
-                <Briefcase
-                  size={16}
-                  color={category === 'Work' ? '#EFF6FF' : '#9CA3AF'}
-                />
-                <Text
+              {!hiddenCategories.includes('Work') && (
+                <TouchableOpacity
                   style={[
-                    styles.categoryText,
-                    category === 'Work' && styles.categoryTextActive,
+                    styles.categoryChip,
+                    category === 'Work' && styles.categoryChipActive,
                   ]}
+                  onPress={() => setCategory('Work')}
                 >
-                  Work
-                </Text>
-              </TouchableOpacity>
+                  <Text
+                    style={[
+                      styles.categoryText,
+                      category === 'Work' && styles.categoryTextActive,
+                    ]}
+                  >
+                    {categoryLabels.Work}
+                  </Text>
+                </TouchableOpacity>
+              )}
 
-              <TouchableOpacity
-                style={[
-                  styles.categoryChip,
-                  category === 'Personal' && styles.categoryChipActive,
-                ]}
-                onPress={() => setCategory('Personal')}
-              >
-                <User
-                  size={16}
-                  color={category === 'Personal' ? '#EFF6FF' : '#9CA3AF'}
-                />
-                <Text
+              {!hiddenCategories.includes('Personal') && (
+                <TouchableOpacity
                   style={[
-                    styles.categoryText,
-                    styles.categoryTextNarrow,
-                    category === 'Personal' && styles.categoryTextActive,
+                    styles.categoryChip,
+                    category === 'Personal' && styles.categoryChipActive,
                   ]}
+                  onPress={() => setCategory('Personal')}
                 >
-                  Personal
-                </Text>
-              </TouchableOpacity>
+                  <Text
+                    style={[
+                      styles.categoryText,
+                      styles.categoryTextNarrow,
+                      category === 'Personal' && styles.categoryTextActive,
+                    ]}
+                  >
+                    {categoryLabels.Personal}
+                  </Text>
+                </TouchableOpacity>
+              )}
 
-              <TouchableOpacity
-                style={[
-                  styles.categoryChip,
-                  category === 'Shopping' && styles.categoryChipActive,
-                ]}
-                onPress={() => setCategory('Shopping')}
-              >
-                <ShoppingBag
-                  size={16}
-                  color={category === 'Shopping' ? '#EFF6FF' : '#9CA3AF'}
-                />
-                <Text
+              {!hiddenCategories.includes('Shopping') && (
+                <TouchableOpacity
                   style={[
-                    styles.categoryText,
-                    category === 'Shopping' && styles.categoryTextActive,
+                    styles.categoryChip,
+                    category === 'Shopping' && styles.categoryChipActive,
                   ]}
+                  onPress={() => setCategory('Shopping')}
                 >
-                  Shopping
-                </Text>
-              </TouchableOpacity>
+                  <Text
+                    style={[
+                      styles.categoryText,
+                      category === 'Shopping' && styles.categoryTextActive,
+                    ]}
+                  >
+                    {categoryLabels.Shopping}
+                  </Text>
+                </TouchableOpacity>
+              )}
 
-              <TouchableOpacity
-                style={[
-                  styles.categoryChip,
-                  category === 'Health' && styles.categoryChipActive,
-                ]}
-                onPress={() => setCategory('Health')}
-              >
-                <Heart
-                  size={16}
-                  color={category === 'Health' ? '#EFF6FF' : '#9CA3AF'}
-                />
-                <Text
+              {!hiddenCategories.includes('Health') && (
+                <TouchableOpacity
                   style={[
-                    styles.categoryText,
-                    category === 'Health' && styles.categoryTextActive,
+                    styles.categoryChip,
+                    category === 'Health' && styles.categoryChipActive,
                   ]}
+                  onPress={() => setCategory('Health')}
                 >
-                  Health
-                </Text>
-              </TouchableOpacity>
+                  <Text
+                    style={[
+                      styles.categoryText,
+                      category === 'Health' && styles.categoryTextActive,
+                    ]}
+                  >
+                    {categoryLabels.Health}
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              {customCategories
+                .filter((c) => !hiddenCategories.includes(c.id))
+                .map((c) => (
+                  <TouchableOpacity
+                    key={c.id}
+                    style={[
+                      styles.categoryChip,
+                      category === c.id && styles.categoryChipActive,
+                    ]}
+                    onPress={() => setCategory(c.id)}
+                  >
+                    <Text
+                      style={[
+                        styles.categoryText,
+                        category === c.id && styles.categoryTextActive,
+                      ]}
+                    >
+                      {getCategoryLabel(c.id)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
             </View>
           </View>
 

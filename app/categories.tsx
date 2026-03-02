@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   SafeAreaView,
   View,
@@ -8,6 +8,8 @@ import {
   TextInput,
   FlatList,
   ActivityIndicator,
+  Modal,
+  Dimensions,
 } from 'react-native';
 import {
   Home,
@@ -16,42 +18,68 @@ import {
   Settings,
   Search,
   Plus,
-  User,
-  ShoppingBag,
-  Dumbbell,
-  BookOpen,
-  Briefcase,
-  House,
+  MoreVertical,
 } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { useTasks } from '../context/TaskContext';
 import { useAuth } from '../context/AuthContext';
 import AddTaskModal from '../components/AddTaskModal';
 import { supabase } from '../lib/supabase';
+import type { TaskCategory } from '../types/task';
 
-type CategoryCard = {
+type CategoryGridItem = {
   id: string;
   label: string;
-  pending: number;
-  icon: React.ReactNode;
   accentColor: string;
   accentBg: string;
+  categoryKey: TaskCategory | string;
+  isCustom: boolean;
 };
 
-const CATEGORIES: Omit<CategoryCard, 'icon'>[] = [
-  { id: 'work', label: 'Work', pending: 12, accentColor: '#60A5FA', accentBg: '#1D4ED8' },
-  { id: 'personal', label: 'Personal', pending: 5, accentColor: '#A855F7', accentBg: '#5B21B6' },
-  { id: 'shopping', label: 'Shopping', pending: 3, accentColor: '#FBBF24', accentBg: '#92400E' },
-  { id: 'fitness', label: 'Fitness', pending: 2, accentColor: '#34D399', accentBg: '#065F46' },
-  { id: 'study', label: 'Study', pending: 8, accentColor: '#F97316', accentBg: '#9A3412' },
-  { id: 'home', label: 'Home', pending: 4, accentColor: '#38BDF8', accentBg: '#0E7490' },
+const BUILT_IN_CATEGORIES: CategoryGridItem[] = [
+  { id: 'work', label: 'Work', accentColor: '#60A5FA', accentBg: '#1D4ED8', categoryKey: 'Work', isCustom: false },
+  { id: 'personal', label: 'Personal', accentColor: '#A855F7', accentBg: '#5B21B6', categoryKey: 'Personal', isCustom: false },
+  { id: 'shopping', label: 'Shopping', accentColor: '#FBBF24', accentBg: '#92400E', categoryKey: 'Shopping', isCustom: false },
+  { id: 'fitness', label: 'Fitness', accentColor: '#34D399', accentBg: '#065F46', categoryKey: 'Health', isCustom: false },
+  { id: 'study', label: 'Study', accentColor: '#F97316', accentBg: '#9A3412', categoryKey: 'New', isCustom: false },
+  { id: 'home', label: 'Home', accentColor: '#38BDF8', accentBg: '#0E7490', categoryKey: 'Personal', isCustom: false },
 ];
+
+const CUSTOM_CATEGORY_ACCENT = { accentColor: '#8B5CF6', accentBg: '#4C1D95' };
 
 export default function CategoriesScreen() {
   const router = useRouter();
-  const { addTask } = useTasks();
+  const {
+    addTask,
+    categoryLabels,
+    renameCategoryLabel,
+    renameCustomCategory,
+    tasks,
+    hiddenCategories,
+    customCategories,
+    addCustomCategory,
+    getCategoryLabel,
+    deleteCategoryAndTasks,
+  } = useTasks();
   const { user, isLoading: authLoading } = useAuth();
   const [isModalVisible, setIsModalVisible] = useState(false);
+  const [addCategoryPanelVisible, setAddCategoryPanelVisible] = useState(false);
+  const [addCategoryName, setAddCategoryName] = useState('');
+  const [categoryMenu, setCategoryMenu] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    categoryId?: string;
+    categoryKey?: TaskCategory | string;
+    categoryLabel?: string;
+  }>({ visible: false, x: 0, y: 0 });
+  const [renameModal, setRenameModal] = useState<{
+    visible: boolean;
+    categoryId?: string;
+    categoryKey?: TaskCategory | string;
+    value: string;
+  }>({ visible: false, value: '' });
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -66,6 +94,40 @@ export default function CategoriesScreen() {
     if (!authLoading && !user) router.replace('/login');
   }, [authLoading, user, router]);
 
+  const taskCountsByCategory = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const task of tasks) {
+      if (!task.category) continue;
+      const key = task.category;
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+    return counts;
+  }, [tasks]);
+
+  const gridData = useMemo(() => {
+    const builtIn = BUILT_IN_CATEGORIES.filter(
+      (c) => !hiddenCategories.includes(c.categoryKey),
+    );
+    const custom = customCategories
+      .filter((c) => !hiddenCategories.includes(c.id))
+      .map((c) => ({
+        id: c.id,
+        label: c.label,
+        categoryKey: c.id as TaskCategory | string,
+        isCustom: true,
+        ...CUSTOM_CATEGORY_ACCENT,
+      }));
+    return [...builtIn, ...custom];
+  }, [hiddenCategories, customCategories]);
+
+  const filteredGridData = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return gridData;
+    return gridData.filter((item) =>
+      getCategoryLabel(item.categoryKey).toLowerCase().includes(q),
+    );
+  }, [gridData, searchQuery, getCategoryLabel]);
+
   if (authLoading || !user) {
     return (
       <View style={styles.loadingContainer}>
@@ -74,38 +136,98 @@ export default function CategoriesScreen() {
     );
   }
 
-  const renderCategory = ({ item }: { item: Omit<CategoryCard, 'icon'> }) => {
-    const renderIcon = () => {
-      switch (item.id) {
-        case 'work':
-          return <Briefcase size={18} color="#F9FAFB" />;
-        case 'personal':
-          return <User size={18} color="#F9FAFB" />;
-        case 'shopping':
-          return <ShoppingBag size={18} color="#F9FAFB" />;
-        case 'fitness':
-          return <Dumbbell size={18} color="#F9FAFB" />;
-        case 'study':
-          return <BookOpen size={18} color="#F9FAFB" />;
-        case 'home':
-        default:
-          return <House size={18} color="#F9FAFB" />;
-      }
-    };
+  const closeCategoryMenu = () => {
+    setCategoryMenu((prev) => ({ ...prev, visible: false }));
+  };
+
+  const openRenameModal = (
+    categoryId: string | undefined,
+    categoryKey: TaskCategory | string | undefined,
+    categoryLabel: string | undefined,
+  ) => {
+    if (!categoryId || !categoryKey) return;
+    setRenameModal({
+      visible: true,
+      categoryId,
+      categoryKey,
+      value: categoryLabel ?? '',
+    });
+  };
+
+  const closeRenameModal = () => {
+    setRenameModal({ visible: false, categoryId: undefined, categoryKey: undefined, value: '' });
+  };
+
+  const handleRenameSave = () => {
+    if (!renameModal.categoryId || !renameModal.categoryKey) return;
+    const trimmed = renameModal.value.trim();
+    if (!trimmed) {
+      closeRenameModal();
+      return;
+    }
+    if (renameModal.categoryKey.startsWith('custom_')) {
+      renameCustomCategory(renameModal.categoryKey, trimmed);
+    } else {
+      const target = BUILT_IN_CATEGORIES.find((c) => c.id === renameModal.categoryId);
+      if (target) renameCategoryLabel(target.categoryKey as TaskCategory, trimmed);
+    }
+    closeRenameModal();
+  };
+
+  const handleAddCategoryCreate = () => {
+    const trimmed = addCategoryName.trim();
+    if (!trimmed) return;
+    addCustomCategory(trimmed);
+    setAddCategoryName('');
+    setAddCategoryPanelVisible(false);
+  };
+
+  const renderCategory = ({ item }: { item: CategoryGridItem }) => {
+    const count = taskCountsByCategory[item.categoryKey] ?? 0;
+    const displayLabel = getCategoryLabel(item.categoryKey);
 
     return (
-      <TouchableOpacity style={styles.categoryCard} activeOpacity={0.85}>
-        <View
-          style={[
-            styles.categoryIconWrapper,
-            { backgroundColor: item.accentBg },
-          ]}
-        >
-          {renderIcon()}
+      <TouchableOpacity
+        style={styles.categoryCard}
+        activeOpacity={0.85}
+        onPress={() => router.push(`/categories/${item.categoryKey}`)}
+      >
+        <View style={styles.categoryCardHeader}>
+          <TouchableOpacity
+            style={styles.categoryDotsButton}
+            activeOpacity={0.7}
+            hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
+            accessibilityRole="button"
+            accessibilityLabel={`Category options for ${displayLabel}`}
+            onPress={(e) => {
+              const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+              const MENU_WIDTH = 168;
+              const MENU_HEIGHT = 96;
+              const MARGIN = 10;
+
+              const pressX = e.nativeEvent.pageX;
+              const pressY = e.nativeEvent.pageY;
+
+              const x = Math.min(pressX, screenWidth - MENU_WIDTH - MARGIN);
+              const y = Math.min(pressY, screenHeight - MENU_HEIGHT - MARGIN);
+
+              setCategoryMenu({
+                visible: true,
+                x: Math.max(MARGIN, x),
+                y: Math.max(MARGIN, y),
+                categoryId: item.id,
+                categoryKey: item.categoryKey,
+                categoryLabel: displayLabel,
+              });
+            }}
+          >
+            <MoreVertical size={18} color="#9CA3AF" />
+          </TouchableOpacity>
         </View>
-        <Text style={styles.categoryTitle}>{item.label}</Text>
+
+        <Text style={styles.categoryTitle}>{displayLabel}</Text>
         <Text style={styles.categorySubtitle}>
-          {item.pending} pending
+          {count} task{count === 1 ? '' : 's'}
         </Text>
       </TouchableOpacity>
     );
@@ -126,9 +248,11 @@ export default function CategoriesScreen() {
 
           <TouchableOpacity
             activeOpacity={0.7}
-            style={styles.headerIconButton}
+            style={styles.headerDotsButton}
+            onPress={() => setAddCategoryPanelVisible(true)}
+            accessibilityLabel="Add category"
           >
-            <Plus size={20} color="#E5E7EB" />
+            <MoreVertical size={20} color="#9CA3AF" />
           </TouchableOpacity>
         </View>
 
@@ -139,24 +263,20 @@ export default function CategoriesScreen() {
             style={styles.searchInput}
             placeholder="Search your life areas..."
             placeholderTextColor="#6B7280"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
           />
         </View>
       </View>
 
       {/* Category grid */}
       <FlatList
-        data={CATEGORIES}
+        data={filteredGridData}
         keyExtractor={(item) => item.id}
         numColumns={2}
         contentContainerStyle={styles.listContent}
         columnWrapperStyle={styles.columnWrapper}
         renderItem={renderCategory}
-        ListFooterComponent={
-          <View style={styles.focusCard}>
-            <Text style={styles.focusTitle}>Focus Mode</Text>
-            <Text style={styles.focusSubtitle}>Keep your tasks organized</Text>
-          </View>
-        }
       />
 
       {/* Bottom navigation & FAB */}
@@ -215,6 +335,177 @@ export default function CategoriesScreen() {
         onClose={() => setIsModalVisible(false)}
         onAdd={addTask}
       />
+
+      <Modal
+        visible={categoryMenu.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeCategoryMenu}
+      >
+        <TouchableOpacity
+          style={styles.categoryMenuOverlay}
+          activeOpacity={1}
+          onPress={closeCategoryMenu}
+        >
+          <TouchableOpacity
+            style={[
+              styles.categoryMenuPanel,
+              { left: categoryMenu.x, top: categoryMenu.y },
+            ]}
+            activeOpacity={1}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <TouchableOpacity
+              style={styles.categoryMenuItem}
+              activeOpacity={0.8}
+              onPress={() => {
+                closeCategoryMenu();
+                openRenameModal(categoryMenu.categoryId, categoryMenu.categoryKey, categoryMenu.categoryLabel);
+              }}
+            >
+              <Text style={styles.categoryMenuItemText}>Edit</Text>
+            </TouchableOpacity>
+
+            <View style={styles.categoryMenuDivider} />
+
+            <TouchableOpacity
+              style={styles.categoryMenuItem}
+              activeOpacity={0.8}
+              onPress={() => {
+                if (categoryMenu.categoryKey) {
+                  deleteCategoryAndTasks(categoryMenu.categoryKey);
+                }
+                closeCategoryMenu();
+              }}
+            >
+              <Text style={[styles.categoryMenuItemText, styles.categoryMenuItemTextDanger]}>
+                Delete
+              </Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
+      <Modal
+        visible={renameModal.visible}
+        transparent
+        animationType="slide"
+        onRequestClose={closeRenameModal}
+      >
+        <TouchableOpacity
+          style={styles.renameOverlay}
+          activeOpacity={1}
+          onPress={closeRenameModal}
+        >
+          <TouchableOpacity
+            style={styles.renameSheet}
+            activeOpacity={1}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <Text style={styles.renameTitle}>Rename category</Text>
+            <TextInput
+              style={styles.renameInput}
+              placeholder="Category name"
+              placeholderTextColor="#6B7280"
+              value={renameModal.value}
+              onChangeText={(text) =>
+                setRenameModal((prev) => ({ ...prev, value: text }))
+              }
+              autoFocus
+            />
+            <View style={styles.renameActions}>
+              <TouchableOpacity
+                style={[styles.renameButton, styles.renameButtonSecondary]}
+                activeOpacity={0.8}
+                onPress={closeRenameModal}
+              >
+                <Text style={styles.renameButtonSecondaryText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.renameButton,
+                  styles.renameButtonPrimary,
+                  !renameModal.value.trim() && styles.renameButtonPrimaryDisabled,
+                ]}
+                activeOpacity={0.8}
+                onPress={handleRenameSave}
+                disabled={!renameModal.value.trim()}
+              >
+                <Text
+                  style={[
+                    styles.renameButtonPrimaryText,
+                    !renameModal.value.trim() &&
+                      styles.renameButtonPrimaryTextDisabled,
+                  ]}
+                >
+                  Save
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Add category slide-up panel (header 3-dots) */}
+      <Modal
+        visible={addCategoryPanelVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setAddCategoryPanelVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.renameOverlay}
+          activeOpacity={1}
+          onPress={() => setAddCategoryPanelVisible(false)}
+        >
+          <TouchableOpacity
+            style={styles.renameSheet}
+            activeOpacity={1}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <Text style={styles.renameTitle}>Add category</Text>
+            <TextInput
+              style={styles.renameInput}
+              placeholder="Category name"
+              placeholderTextColor="#6B7280"
+              value={addCategoryName}
+              onChangeText={setAddCategoryName}
+              autoFocus
+            />
+            <View style={styles.renameActions}>
+              <TouchableOpacity
+                style={[styles.renameButton, styles.renameButtonSecondary]}
+                activeOpacity={0.8}
+                onPress={() => {
+                  setAddCategoryName('');
+                  setAddCategoryPanelVisible(false);
+                }}
+              >
+                <Text style={styles.renameButtonSecondaryText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.renameButton,
+                  styles.renameButtonPrimary,
+                  !addCategoryName.trim() && styles.renameButtonPrimaryDisabled,
+                ]}
+                activeOpacity={0.8}
+                onPress={handleAddCategoryCreate}
+                disabled={!addCategoryName.trim()}
+              >
+                <Text
+                  style={[
+                    styles.renameButtonPrimaryText,
+                    !addCategoryName.trim() && styles.renameButtonPrimaryTextDisabled,
+                  ]}
+                >
+                  Create
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -262,13 +553,8 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_600SemiBold',
     color: '#F9FAFB',
   },
-  headerIconButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#1D4ED8',
-    alignItems: 'center',
-    justifyContent: 'center',
+  headerDotsButton: {
+    padding: 8,
   },
   searchBar: {
     marginTop: 4,
@@ -304,43 +590,129 @@ const styles = StyleSheet.create({
     backgroundColor: '#020617',
     borderWidth: 1,
     borderColor: '#111827',
-    padding: 14,
+    paddingTop: 0,
+    paddingBottom: 14,
+    paddingHorizontal: 14,
     marginHorizontal: 4,
   },
-  categoryIconWrapper: {
-    width: 32,
-    height: 32,
-    borderRadius: 12,
+  categoryCardHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
+    justifyContent: 'flex-end',
+    marginTop: 12,
+    marginBottom: 0,
+  },
+  categoryDotsButton: {
+    padding: 12,
+    marginRight: -4,
+  },
+  categoryMenuOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(2,6,23,0.25)',
+  },
+  categoryMenuPanel: {
+    position: 'absolute',
+    width: 168,
+    borderRadius: 14,
+    backgroundColor: '#0B1220',
+    borderWidth: 1,
+    borderColor: '#111827',
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.35,
+    shadowRadius: 18,
+    elevation: 18,
+  },
+  categoryMenuItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  categoryMenuItemText: {
+    fontSize: 14,
+    fontFamily: 'Inter_500Medium',
+    color: '#E5E7EB',
+  },
+  categoryMenuItemTextDanger: {
+    color: '#F87171',
+  },
+  categoryMenuDivider: {
+    height: 1,
+    backgroundColor: '#111827',
+  },
+  renameOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.6)',
+    justifyContent: 'flex-end',
+  },
+  renameSheet: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 30,
+    backgroundColor: '#020617',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderTopWidth: 1,
+    borderColor: '#111827',
+  },
+  renameTitle: {
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#E5E7EB',
+    marginBottom: 12,
+  },
+  renameInput: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#1D4ED8',
+    backgroundColor: '#020617',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 15,
+    fontFamily: 'Inter_500Medium',
+    color: '#E5E7EB',
+    marginBottom: 18,
+  },
+  renameActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+  },
+  renameButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 999,
+  },
+  renameButtonSecondary: {
+    backgroundColor: 'transparent',
+  },
+  renameButtonSecondaryText: {
+    fontSize: 14,
+    fontFamily: 'Inter_500Medium',
+    color: '#9CA3AF',
+  },
+  renameButtonPrimary: {
+    backgroundColor: '#2563EB',
+  },
+  renameButtonPrimaryDisabled: {
+    backgroundColor: '#1F2937',
+  },
+  renameButtonPrimaryText: {
+    fontSize: 14,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#F9FAFB',
+  },
+  renameButtonPrimaryTextDisabled: {
+    color: '#6B7280',
   },
   categoryTitle: {
     fontSize: 16,
     fontFamily: 'Inter_600SemiBold',
     color: '#F9FAFB',
+    marginTop: -22,
     marginBottom: 4,
   },
   categorySubtitle: {
-    fontSize: 13,
-    fontFamily: 'Inter_400Regular',
-    color: '#9CA3AF',
-  },
-  focusCard: {
-    marginTop: 6,
-    marginHorizontal: 4,
-    borderRadius: 20,
-    paddingVertical: 18,
-    paddingHorizontal: 18,
-    backgroundColor: '#1D2448',
-  },
-  focusTitle: {
-    fontSize: 16,
-    fontFamily: 'Inter_600SemiBold',
-    color: '#E5E7EB',
-    marginBottom: 4,
-  },
-  focusSubtitle: {
     fontSize: 13,
     fontFamily: 'Inter_400Regular',
     color: '#9CA3AF',
