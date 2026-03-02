@@ -1,3 +1,6 @@
+/** Category shown when creating a task and on the task detail screen */
+export type TaskCategory = 'Work' | 'Personal' | 'Shopping' | 'Health' | 'New';
+
 /** Optional location for "remind me when I'm near" notifications */
 export interface TaskLocationReminder {
   locationName: string;
@@ -21,6 +24,8 @@ export interface Task {
   isCompleted: boolean;
   date?: Date;
   listId: string; // For future multiple lists support
+  /** Category (e.g. Work, Personal) shown on task detail */
+  category?: TaskCategory;
   /** When set, user gets a notification when arriving near this location */
   locationReminder?: TaskLocationReminder;
   /** Optional list of sub-tasks */
@@ -34,7 +39,8 @@ export type TaskContextType = {
     details?: string,
     date?: Date,
     locationReminder?: TaskLocationReminder,
-    subtasks?: SubTask[]
+    subtasks?: SubTask[],
+    category?: TaskCategory
   ) => void;
   toggleTask: (id: string) => void;
   toggleSubtask: (taskId: string, subtaskId: string) => void;

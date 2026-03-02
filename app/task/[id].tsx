@@ -8,7 +8,7 @@ import {
   SafeAreaView,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ChevronLeft, Calendar, MapPin, Check, Trash2, ListChecks, MoreVertical } from 'lucide-react-native';
+import { ChevronLeft, Calendar, MapPin, Check, Trash2, ListChecks, MoreVertical, Folder } from 'lucide-react-native';
 import { format } from 'date-fns';
 import { useTasks } from '../../context/TaskContext';
 import { Colors } from '../../constants/Colors';
@@ -97,6 +97,17 @@ export default function TaskDetailScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>Details</Text>
             <Text style={styles.detailsText}>{task.details}</Text>
+          </View>
+        ) : null}
+
+        {/* Category */}
+        {task.category ? (
+          <View style={styles.section}>
+            <View style={styles.sectionRow}>
+              <Folder size={18} color="#9CA3AF" />
+              <Text style={styles.sectionLabel}>Category</Text>
+            </View>
+            <Text style={styles.categoryText}>{task.category}</Text>
           </View>
         ) : null}
 
@@ -256,6 +267,11 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_400Regular',
     color: '#E5E7EB',
     lineHeight: 24,
+  },
+  categoryText: {
+    fontSize: 16,
+    fontFamily: 'Inter_500Medium',
+    color: '#9CA3AF',
   },
   subtaskRow: {
     flexDirection: 'row',

@@ -21,9 +21,11 @@ import {
   Heart,
   Plus,
   MapPin,
+  ListChecks,
+  Trash2,
 } from 'lucide-react-native';
 import { Calendar as DateCalendar } from 'react-native-calendars';
-import type { TaskLocationReminder } from '../types/task';
+import type { TaskLocationReminder, SubTask, TaskCategory } from '../types/task';
 import * as Location from 'expo-location';
 import { geocodePlaceName, requestLocationReminderPermissions } from '../lib/geofencing';
 import {
@@ -36,7 +38,7 @@ import {
 interface AddTaskModalProps {
   visible: boolean;
   onClose: () => void;
-  onAdd: (title: string, details?: string, date?: Date, locationReminder?: TaskLocationReminder) => void;
+  onAdd: (title: string, details?: string, date?: Date, locationReminder?: TaskLocationReminder, subtasks?: SubTask[], category?: TaskCategory) => void;
 }
 
 export default function AddTaskModal({ visible, onClose, onAdd }: AddTaskModalProps) {
@@ -54,6 +56,7 @@ export default function AddTaskModal({ visible, onClose, onAdd }: AddTaskModalPr
   const [locationError, setLocationError] = useState<string | null>(null);
   const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
   const [category, setCategory] = useState<'Work' | 'Personal' | 'Shopping' | 'Health' | 'New'>('Work');
+  const [subtasks, setSubtasks] = useState<{ id: string; title: string }[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [notifyWithinFeet, setNotifyWithinFeet] = useState(500);
@@ -154,7 +157,7 @@ export default function AddTaskModal({ visible, onClose, onAdd }: AddTaskModalPr
   };
 
   const handleSave = async () => {
-    if (!title.trim()) return;
+    if (!title.trim() || !date) return;
     setLocationError(null);
     let locationReminder: TaskLocationReminder | undefined;
     if (remindNearLocation && locationPlaceName.trim()) {
@@ -182,7 +185,10 @@ export default function AddTaskModal({ visible, onClose, onAdd }: AddTaskModalPr
         }
       }
     }
-    onAdd(title, details, date, locationReminder);
+    const subTaskList: SubTask[] = subtasks
+      .filter((s) => s.title.trim())
+      .map((s) => ({ id: s.id, title: s.title.trim(), isCompleted: false }));
+    onAdd(title, details, date, locationReminder, subTaskList.length ? subTaskList : undefined, category);
     resetForm();
     onClose();
   };
@@ -200,6 +206,19 @@ export default function AddTaskModal({ visible, onClose, onAdd }: AddTaskModalPr
     setLocationError(null);
     setSuggestionsError(null);
     setCategory('Work');
+    setSubtasks([]);
+  };
+
+  const addSubtask = () => {
+    setSubtasks((prev) => [...prev, { id: Date.now().toString(), title: '' }]);
+  };
+
+  const updateSubtask = (id: string, title: string) => {
+    setSubtasks((prev) => prev.map((s) => (s.id === id ? { ...s, title } : s)));
+  };
+
+  const removeSubtask = (id: string) => {
+    setSubtasks((prev) => prev.filter((s) => s.id !== id));
   };
 
   const handleRemindNearToggle = (value: boolean) => {
@@ -219,7 +238,10 @@ export default function AddTaskModal({ visible, onClose, onAdd }: AddTaskModalPr
     ? { [formatDateString(date)]: { selected: true, selectedColor: '#2563EB', selectedTextColor: '#FFFFFF' } }
     : {};
 
+  const todayString = formatDateString(new Date());
+
   const handleDayPress = (day: { dateString: string }) => {
+    if (day.dateString < todayString) return;
     const [y, m, dayNum] = day.dateString.split('-').map(Number);
     setDate(new Date(y, m - 1, dayNum));
   };
@@ -294,6 +316,48 @@ export default function AddTaskModal({ visible, onClose, onAdd }: AddTaskModalPr
                 autoFocus={true}
               />
             </View>
+          </View>
+
+          {/* Sub-tasks */}
+          <View style={styles.section}>
+            <View style={styles.subtaskHeader}>
+              <Text style={styles.sectionLabel}>Sub-tasks</Text>
+              <TouchableOpacity
+                onPress={addSubtask}
+                style={styles.addSubtaskButton}
+                activeOpacity={0.7}
+              >
+                <ListChecks size={16} color="#60A5FA" />
+                <Text style={styles.addSubtaskText}>Add sub-task</Text>
+              </TouchableOpacity>
+            </View>
+            {subtasks.length === 0 ? (
+              <View style={styles.subtaskEmpty}>
+                <Text style={styles.subtaskEmptyText}>No sub-tasks yet</Text>
+                <Text style={styles.subtaskEmptyHint}>Tap "Add sub-task" to break this task into steps</Text>
+              </View>
+            ) : (
+              subtasks.map((st) => (
+                <View key={st.id} style={styles.subtaskRow}>
+                  <View style={styles.subtaskInputWrap}>
+                    <TextInput
+                      style={styles.subtaskInput}
+                      placeholder="Sub-task"
+                      placeholderTextColor="#6B7280"
+                      value={st.title}
+                      onChangeText={(t) => updateSubtask(st.id, t)}
+                    />
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => removeSubtask(st.id)}
+                    style={styles.removeSubtaskBtn}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Trash2 size={18} color="#9CA3AF" />
+                  </TouchableOpacity>
+                </View>
+              ))
+            )}
           </View>
 
           {/* Due date - tap anywhere to open calendar */}
@@ -531,20 +595,20 @@ export default function AddTaskModal({ visible, onClose, onAdd }: AddTaskModalPr
             multiline
           />
 
-          {/* Primary action */}
+          {/* Primary action — requires title and due date */}
           <TouchableOpacity
             style={[
               styles.saveButton,
-              (!title.trim() || isGeocoding) && styles.saveButtonDisabled,
+              (!title.trim() || !date || isGeocoding) && styles.saveButtonDisabled,
             ]}
             onPress={handleSave}
-            disabled={!title.trim() || isGeocoding}
+            disabled={!title.trim() || !date || isGeocoding}
             activeOpacity={0.9}
           >
             <Text
               style={[
                 styles.saveButtonText,
-                !title.trim() && styles.saveButtonTextDisabled,
+                (!title.trim() || !date) && styles.saveButtonTextDisabled,
               ]}
             >
               Create Task
@@ -583,8 +647,9 @@ export default function AddTaskModal({ visible, onClose, onAdd }: AddTaskModalPr
             <View style={styles.datePickerContent}>
               <Text style={styles.datePickerSectionLabel}>Select a date</Text>
               <DateCalendar
+                minDate={todayString}
                 current={date ? formatDateString(date) : undefined}
-                initialDate={date ? formatDateString(date) : formatDateString(new Date())}
+                initialDate={date ? formatDateString(date) : todayString}
                 onDayPress={handleDayPress}
                 markedDates={markedDates}
                 theme={calendarTheme}
@@ -681,6 +746,69 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: 'Inter_500Medium',
     color: '#E5E7EB',
+  },
+  subtaskHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  addSubtaskButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  addSubtaskText: {
+    fontSize: 14,
+    fontFamily: 'Inter_500Medium',
+    color: '#60A5FA',
+  },
+  subtaskEmpty: {
+    backgroundColor: '#020617',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#1F2937',
+    borderStyle: 'dashed',
+    paddingVertical: 20,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  subtaskEmptyText: {
+    fontSize: 14,
+    fontFamily: 'Inter_500Medium',
+    color: '#6B7280',
+    marginBottom: 4,
+  },
+  subtaskEmptyHint: {
+    fontSize: 12,
+    fontFamily: 'Inter_400Regular',
+    color: '#4B5563',
+  },
+  subtaskRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 8,
+  },
+  subtaskInputWrap: {
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#1F2937',
+    backgroundColor: '#0F172A',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  subtaskInput: {
+    fontSize: 14,
+    fontFamily: 'Inter_500Medium',
+    color: '#E5E7EB',
+    padding: 0,
+  },
+  removeSubtaskBtn: {
+    padding: 8,
   },
   sectionCard: {
     flexDirection: 'row',

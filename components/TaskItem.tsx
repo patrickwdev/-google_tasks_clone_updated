@@ -1,6 +1,6 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { Check, Trash2, MapPin } from 'lucide-react-native';
+import React, { useState, useRef } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, TouchableWithoutFeedback, Dimensions } from 'react-native';
+import { Check, Trash2, MapPin, MoreVertical, ListChecks } from 'lucide-react-native';
 import { Colors } from '../constants/Colors';
 import { Task } from '../types/task';
 import { format } from 'date-fns';
@@ -9,9 +9,100 @@ interface TaskItemProps {
   task: Task;
   onToggle: (id: string) => void;
   onDelete: (id: string) => void;
+  /** When set, tapping the task content (title/details) opens this screen */
+  onPress?: (task: Task) => void;
+  /** When set, shows an edit button that calls this with the task */
+  onEdit?: (task: Task) => void;
 }
 
-export default function TaskItem({ task, onToggle, onDelete }: TaskItemProps) {
+const PANEL_WIDTH = 160;
+const PANEL_HEIGHT_EST = 56;
+const GAP = 8;
+const SAFE_PADDING = 16;
+
+export default function TaskItem({ task, onToggle, onDelete, onPress, onEdit }: TaskItemProps) {
+  const [showActionPanel, setShowActionPanel] = useState(false);
+  const [panelAnchor, setPanelAnchor] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const dotsRef = useRef<View>(null);
+
+  const openPanel = () => {
+    dotsRef.current?.measureInWindow((x, y, w, h) => {
+      setPanelAnchor({ x, y, w, h });
+      setShowActionPanel(true);
+    });
+  };
+
+  const closePanel = () => {
+    setShowActionPanel(false);
+    setPanelAnchor(null);
+  };
+
+  const handleDelete = () => {
+    closePanel();
+    onDelete(task.id);
+  };
+
+  const content = (
+    <>
+      {task.isCompleted && (
+        <View style={styles.completedBadge}>
+          <Check size={12} color="#FFF" strokeWidth={2.5} />
+          <Text style={styles.completedBadgeText}>Completed</Text>
+        </View>
+      )}
+      <Text
+        style={[styles.title, task.isCompleted && styles.titleCompleted]}
+        numberOfLines={2}
+      >
+        {task.title}
+      </Text>
+      {task.details && (
+        <Text style={styles.details} numberOfLines={1}>
+          {task.details}
+        </Text>
+      )}
+      {task.date && (
+        <View style={styles.dateContainer}>
+          <Text style={styles.dateText}>
+            {format(new Date(task.date), 'EEE, MMM d')}
+          </Text>
+        </View>
+      )}
+      {task.locationReminder && (
+        <View style={styles.locationContainer}>
+          <MapPin size={12} color={Colors.light.primary} />
+          <Text style={styles.locationText}>Remind near {task.locationReminder.locationName}</Text>
+        </View>
+      )}
+      {task.subtasks && task.subtasks.length > 0 && (
+        <View style={styles.subtasksContainer}>
+          <View style={styles.subtasksHeader}>
+            <ListChecks size={12} color="#6B7280" />
+            <Text style={styles.subtasksLabel}>
+              {task.subtasks.filter((st) => st.isCompleted).length} of {task.subtasks.length}
+            </Text>
+          </View>
+          {task.subtasks.slice(0, 3).map((st) => (
+            <View key={st.id} style={styles.subtaskRow}>
+              <View style={[styles.subtaskDot, st.isCompleted && styles.subtaskDotCompleted]}>
+                {st.isCompleted && <Check size={10} color="#FFF" strokeWidth={2.5} />}
+              </View>
+              <Text
+                style={[styles.subtaskTitle, st.isCompleted && styles.subtaskTitleCompleted]}
+                numberOfLines={1}
+              >
+                {st.title}
+              </Text>
+            </View>
+          ))}
+          {task.subtasks.length > 3 && (
+            <Text style={styles.subtaskMore}>+{task.subtasks.length - 3} more</Text>
+          )}
+        </View>
+      )}
+    </>
+  );
+
   return (
     <View style={styles.container}>
       <TouchableOpacity
@@ -23,38 +114,73 @@ export default function TaskItem({ task, onToggle, onDelete }: TaskItemProps) {
       </TouchableOpacity>
 
       <View style={styles.content}>
-        <Text
-          style={[styles.title, task.isCompleted && styles.titleCompleted]}
-          numberOfLines={2}
-        >
-          {task.title}
-        </Text>
-        {task.details && (
-          <Text style={styles.details} numberOfLines={1}>
-            {task.details}
-          </Text>
-        )}
-        {task.date && (
-          <View style={styles.dateContainer}>
-            <Text style={styles.dateText}>
-              {format(new Date(task.date), 'EEE, MMM d')}
-            </Text>
-          </View>
-        )}
-        {task.locationReminder && (
-          <View style={styles.locationContainer}>
-            <MapPin size={12} color={Colors.light.primary} />
-            <Text style={styles.locationText}>Remind near {task.locationReminder.locationName}</Text>
-          </View>
+        {onPress ? (
+          <TouchableOpacity
+            style={styles.contentTouchable}
+            onPress={() => onPress(task)}
+            activeOpacity={0.7}
+          >
+            {content}
+          </TouchableOpacity>
+        ) : (
+          content
         )}
       </View>
 
-      {/* Optional: Add a subtle delete or menu button if needed, 
-          for now keeping it clean like Google Tasks (usually swipe or detail view) 
-          Adding a small delete button for UX convenience in this MVP */}
-      <TouchableOpacity onPress={() => onDelete(task.id)} style={styles.deleteBtn}>
+      {onEdit ? (
+        <View ref={dotsRef} collapsable={false}>
+          <TouchableOpacity onPress={openPanel} style={styles.actionBtn}>
+            <MoreVertical size={18} color={Colors.light.textSecondary} />
+          </TouchableOpacity>
+        </View>
+      ) : null}
+      {!onEdit ? (
+        <TouchableOpacity onPress={() => onDelete(task.id)} style={styles.actionBtn}>
           <Trash2 size={18} color={Colors.light.textSecondary} />
-      </TouchableOpacity>
+        </TouchableOpacity>
+      ) : null}
+
+      <Modal
+        visible={showActionPanel}
+        transparent
+        animationType="fade"
+        onRequestClose={closePanel}
+      >
+        <TouchableWithoutFeedback onPress={closePanel}>
+          <View style={styles.panelOverlay} />
+        </TouchableWithoutFeedback>
+        {panelAnchor && (
+          <View
+            style={[
+              styles.panelAnchor,
+              (() => {
+                const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+                let left = panelAnchor.x + panelAnchor.w - PANEL_WIDTH;
+                if (left < SAFE_PADDING) left = SAFE_PADDING;
+                if (left + PANEL_WIDTH > screenWidth - SAFE_PADDING) left = screenWidth - PANEL_WIDTH - SAFE_PADDING;
+                let top = panelAnchor.y + panelAnchor.h + GAP;
+                if (top + PANEL_HEIGHT_EST > screenHeight - SAFE_PADDING) {
+                  top = panelAnchor.y - PANEL_HEIGHT_EST - GAP;
+                }
+                if (top < SAFE_PADDING) top = SAFE_PADDING;
+                return { left, top };
+              })(),
+            ]}
+            pointerEvents="box-none"
+          >
+            <View style={styles.panel}>
+              <TouchableOpacity
+                style={styles.panelOption}
+                onPress={handleDelete}
+                activeOpacity={0.7}
+              >
+                <Trash2 size={18} color="#FFF" />
+                <Text style={styles.panelOptionText}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+      </Modal>
     </View>
   );
 }
@@ -89,6 +215,25 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     justifyContent: 'center',
+  },
+  contentTouchable: {
+    flex: 1,
+  },
+  completedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    backgroundColor: Colors.light.success,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    marginBottom: 8,
+  },
+  completedBadgeText: {
+    fontSize: 12,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#FFF',
   },
   title: {
     fontSize: 16,
@@ -131,8 +276,88 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_400Regular',
     color: '#9CA3AF',
   },
-  deleteBtn: {
+  subtasksContainer: {
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#1F2937',
+  },
+  subtasksHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 6,
+  },
+  subtasksLabel: {
+    fontSize: 11,
+    fontFamily: 'Inter_500Medium',
+    color: '#6B7280',
+  },
+  subtaskRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+    gap: 6,
+  },
+  subtaskDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 1.5,
+    borderColor: '#4B5563',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  subtaskDotCompleted: {
+    backgroundColor: Colors.light.primary,
+    borderColor: Colors.light.primary,
+  },
+  subtaskTitle: {
+    flex: 1,
+    fontSize: 12,
+    fontFamily: 'Inter_400Regular',
+    color: '#9CA3AF',
+  },
+  subtaskTitleCompleted: {
+    textDecorationLine: 'line-through',
+    color: '#6B7280',
+  },
+  subtaskMore: {
+    fontSize: 11,
+    fontFamily: 'Inter_500Medium',
+    color: '#6B7280',
+    marginTop: 2,
+    marginLeft: 20,
+  },
+  actionBtn: {
     padding: 8,
-    marginLeft: 8,
-  }
+    marginLeft: 4,
+  },
+  panelOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  panelAnchor: {
+    position: 'absolute',
+  },
+  panel: {
+    backgroundColor: '#1E293B',
+    borderRadius: 12,
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+    minWidth: PANEL_WIDTH,
+  },
+  panelOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  panelOptionText: {
+    fontSize: 15,
+    fontFamily: 'Inter_500Medium',
+    color: '#FFF',
+  },
 });
