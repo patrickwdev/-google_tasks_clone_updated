@@ -8,7 +8,7 @@ import {
   SafeAreaView,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ChevronLeft, Calendar, MapPin, Check, Trash2, ListChecks, MoreVertical, Folder } from 'lucide-react-native';
+import { ChevronLeft, Calendar, MapPin, Check, Trash2, ListChecks, MoreVertical, Folder, Bell } from 'lucide-react-native';
 import { format } from 'date-fns';
 import { useTasks } from '../../context/TaskContext';
 import { Colors } from '../../constants/Colors';
@@ -159,6 +159,27 @@ export default function TaskDetailScreen() {
             </View>
           );
         })() : null}
+
+        {/* Date/time reminders */}
+        {task.reminders && task.reminders.length > 0 ? (
+          <View style={styles.section}>
+            <View style={styles.sectionRow}>
+              <Bell size={18} color="#9CA3AF" />
+              <Text style={styles.sectionLabel}>Reminders</Text>
+            </View>
+            {task.reminders.map((reminderDate, index) => {
+              const d = reminderDate instanceof Date ? reminderDate : new Date(reminderDate);
+              const hasTime = d.getHours() !== 0 || d.getMinutes() !== 0;
+              return (
+                <Text key={index} style={styles.reminderText}>
+                  {hasTime
+                    ? format(d, "EEEE, MMMM d, yyyy 'at' h:mm a")
+                    : format(d, 'EEEE, MMMM d, yyyy')}
+                </Text>
+              );
+            })}
+          </View>
+        ) : null}
 
         {/* Location reminder */}
         {task.locationReminder ? (
@@ -319,6 +340,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: 'Inter_500Medium',
     color: '#BFDBFE',
+  },
+  reminderText: {
+    fontSize: 16,
+    fontFamily: 'Inter_500Medium',
+    color: '#93C5FD',
+    marginBottom: 6,
   },
   locationText: {
     fontSize: 16,

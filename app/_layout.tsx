@@ -20,8 +20,15 @@ LogBox.ignoreLogs([
 ]);
 import { Colors } from '../constants/Colors';
 import { useFrameworkReady } from '../hooks/useFrameworkReady';
+import { useNotificationNavigation } from '../hooks/useNotificationNavigation';
 
 const SPLASH_DURATION_MS = 1500;
+
+/** Listens for notification taps and navigates to task detail. Renders nothing. */
+function NotificationNavigationHandler() {
+  useNotificationNavigation();
+  return null;
+}
 
 export default function RootLayout() {
   useFrameworkReady();
@@ -59,6 +66,7 @@ export default function RootLayout() {
   return (
     <AuthProvider>
       <TaskProvider>
+        <NotificationNavigationHandler />
         <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="login" />

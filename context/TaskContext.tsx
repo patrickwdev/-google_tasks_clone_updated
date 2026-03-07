@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Task, TaskContextType, TaskLocationReminder, SubTask, TaskCategory, CategoryLabels, CustomCategory } from '../types/task';
 import { syncGeofencesForTasks } from '../lib/geofencing';
+import { scheduleReminderNotifications, cancelReminderNotificationsForTask } from '../lib/reminderNotifications';
 import { useAuth } from './AuthContext';
 import { fetchTasks, insertTask, updateTask, deleteTaskById } from '../lib/tasksDb';
 
@@ -152,6 +153,11 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
       .then((list) => {
         if (!cancelled) {
           setTasks(list);
+          list.forEach((task) => {
+            if (task.reminders?.length) {
+              scheduleReminderNotifications(task.id, task.title, task.reminders).catch(() => {});
+            }
+          });
         }
       })
       .catch((err) => {
@@ -199,6 +205,9 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
         insertTask(user.id, { title, details, date, locationReminder, subtasks, category, reminders: sortedReminders })
           .then((created) => {
             setTasks((prev) => prev.map((t) => (t.id === tempId ? created : t)));
+            if (created.reminders?.length) {
+              scheduleReminderNotifications(created.id, created.title, created.reminders).catch(() => {});
+            }
           })
           .catch((err) => {
             console.warn('Failed to save task to Supabase:', err);
@@ -270,6 +279,7 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
 
   const deleteTask = useCallback(
     (id: string) => {
+      cancelReminderNotificationsForTask(id).catch(() => {});
       if (user && !id.startsWith('temp-')) {
         deleteTaskById(user.id, id).catch((err) =>
           console.warn('Failed to delete task from Supabase:', err)
@@ -311,9 +321,17 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
   const updateTaskReminders = useCallback(
     (taskId: string, reminders: Date[]) => {
       const sorted = [...reminders].sort((a, b) => a.getTime() - b.getTime());
-      setTasks((prev) =>
-        prev.map((task) => (task.id === taskId ? { ...task, reminders: sorted } : task))
-      );
+      setTasks((prev) => {
+        const next = prev.map((task) => (task.id === taskId ? { ...task, reminders: sorted } : task));
+        const task = next.find((t) => t.id === taskId);
+        const title = task?.title ?? 'Task';
+        if (sorted.length > 0) {
+          scheduleReminderNotifications(taskId, title, sorted).catch(() => {});
+        } else {
+          cancelReminderNotificationsForTask(taskId).catch(() => {});
+        }
+        return next;
+      });
       if (user && !taskId.startsWith('temp-')) {
         updateTask(user.id, taskId, { reminders: sorted }).catch((err) =>
           console.warn('Failed to update task in Supabase:', err)
