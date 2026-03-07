@@ -7,7 +7,7 @@ import { fetchTasks, insertTask, updateTask, deleteTaskById } from '../lib/tasks
 
 const HIDDEN_CATEGORIES_KEY = (userId: string) => `hidden_categories_${userId}`;
 const CUSTOM_CATEGORIES_KEY = (userId: string) => `custom_categories_${userId}`;
-const VALID_CATEGORIES: TaskCategory[] = ['Work', 'Personal', 'Shopping', 'Health', 'New'];
+const VALID_CATEGORIES: TaskCategory[] = ['Work', 'Personal', 'Shopping', 'Health', 'Home'];
 const CUSTOM_ID_PREFIX = 'custom_';
 
 const TaskContext = createContext<TaskContextType | undefined>(undefined);
@@ -39,15 +39,15 @@ export const useTasks = () => {
 };
 
 export const TaskProvider = ({ children }: { children: ReactNode }) => {
-  const { user } = useAuth();
-  const [tasks, setTasks] = useState<Task[]>(DEFAULT_TASKS);
+  const { user, isLoading: authLoading } = useAuth();
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [tasksLoaded, setTasksLoaded] = useState(false);
   const [categoryLabels, setCategoryLabels] = useState<CategoryLabels>({
     Work: 'Work',
     Personal: 'Personal',
     Shopping: 'Shopping',
     Health: 'Health',
-    New: 'New',
+    Home: 'Home',
   });
   const [hiddenCategories, setHiddenCategories] = useState<(TaskCategory | string)[]>([]);
   const [customCategories, setCustomCategories] = useState<CustomCategory[]>([]);
@@ -137,25 +137,27 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
     AsyncStorage.setItem(CUSTOM_CATEGORIES_KEY(user.id), JSON.stringify(customCategories)).catch(() => {});
   }, [user?.id, customCategories]);
 
-  // Load tasks from Supabase when user is logged in
+  // Load tasks from Supabase when user is logged in; show default welcome tasks only when not logged in
   useEffect(() => {
+    if (authLoading) return;
     if (!user) {
       setTasks(DEFAULT_TASKS);
-      setTasksLoaded(false);
+      setTasksLoaded(true);
       return;
     }
     let cancelled = false;
+    setTasks([]);
     setTasksLoaded(false);
     fetchTasks(user.id)
       .then((list) => {
         if (!cancelled) {
-          setTasks(list.length ? list : DEFAULT_TASKS);
+          setTasks(list);
         }
       })
       .catch((err) => {
         if (!cancelled) {
           console.warn('Failed to load tasks from Supabase:', err);
-          setTasks(DEFAULT_TASKS);
+          setTasks([]);
         }
       })
       .finally(() => {
@@ -164,7 +166,7 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
     return () => {
       cancelled = true;
     };
-  }, [user?.id]);
+  }, [authLoading, user?.id]);
 
   const addTask = useCallback(
     (
@@ -173,8 +175,12 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
       date?: Date,
       locationReminder?: TaskLocationReminder,
       subtasks?: SubTask[],
-      category?: TaskCategory
+      category?: TaskCategory | string,
+      reminders?: Date[]
     ) => {
+      const sortedReminders = reminders?.length
+        ? [...reminders].sort((a, b) => a.getTime() - b.getTime())
+        : undefined;
       if (user) {
         const tempId = `temp-${Date.now()}`;
         const tempTask: Task = {
@@ -186,10 +192,11 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
           listId: 'default',
           category,
           locationReminder,
+          reminders: sortedReminders,
           subtasks: subtasks?.length ? subtasks : undefined,
         };
         setTasks((prev) => [tempTask, ...prev]);
-        insertTask(user.id, { title, details, date, locationReminder, subtasks, category })
+        insertTask(user.id, { title, details, date, locationReminder, subtasks, category, reminders: sortedReminders })
           .then((created) => {
             setTasks((prev) => prev.map((t) => (t.id === tempId ? created : t)));
           })
@@ -207,6 +214,7 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
           listId: 'default',
           category,
           locationReminder,
+          reminders: sortedReminders,
           subtasks: subtasks?.length ? subtasks : undefined,
         };
         setTasks((prev) => [newTask, ...prev]);
@@ -300,6 +308,21 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
     [user]
   );
 
+  const updateTaskReminders = useCallback(
+    (taskId: string, reminders: Date[]) => {
+      const sorted = [...reminders].sort((a, b) => a.getTime() - b.getTime());
+      setTasks((prev) =>
+        prev.map((task) => (task.id === taskId ? { ...task, reminders: sorted } : task))
+      );
+      if (user && !taskId.startsWith('temp-')) {
+        updateTask(user.id, taskId, { reminders: sorted }).catch((err) =>
+          console.warn('Failed to update task in Supabase:', err)
+        );
+      }
+    },
+    [user]
+  );
+
   const addSubtask = useCallback(
     (taskId: string, title: string) => {
       const newSubtask: SubTask = {
@@ -345,20 +368,39 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
     [user]
   );
 
-  const addCustomCategory = useCallback((label: string) => {
+  /** True if another category (built-in or custom) already has this display name (case-insensitive). */
+  const isCategoryLabelTaken = useCallback(
+    (trimmedLabel: string, excludeKey?: TaskCategory | string): boolean => {
+      const norm = trimmedLabel.toLowerCase();
+      const builtInLabels = (Object.entries(categoryLabels) as [TaskCategory, string][]).map(([k, v]) =>
+        excludeKey === k ? '' : v
+      ).filter(Boolean);
+      const customLabels = customCategories.map((c) => (c.id === excludeKey ? '' : c.label)).filter(Boolean);
+      const others = [...builtInLabels, ...customLabels];
+      return others.some((l) => l.trim().toLowerCase() === norm);
+    },
+    [categoryLabels, customCategories]
+  );
+
+  /** Each new category gets a unique id (used as categoryKey); no two user-added categories share a key. */
+  const addCustomCategory = useCallback((label: string): boolean => {
     const trimmed = label.trim();
-    if (!trimmed) return;
+    if (!trimmed) return false;
+    if (isCategoryLabelTaken(trimmed)) return false;
     const id = `${CUSTOM_ID_PREFIX}${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
     setCustomCategories((prev) => [...prev, { id, label: trimmed }]);
-  }, []);
+    return true;
+  }, [isCategoryLabelTaken]);
 
-  const renameCustomCategory = useCallback((id: string, label: string) => {
+  const renameCustomCategory = useCallback((id: string, label: string): boolean => {
     const trimmed = label.trim();
-    if (!trimmed || !id.startsWith(CUSTOM_ID_PREFIX)) return;
+    if (!trimmed || !id.startsWith(CUSTOM_ID_PREFIX)) return false;
+    if (isCategoryLabelTaken(trimmed, id)) return false;
     setCustomCategories((prev) =>
       prev.map((c) => (c.id === id ? { ...c, label: trimmed } : c))
     );
-  }, []);
+    return true;
+  }, [isCategoryLabelTaken]);
 
   const getCategoryLabel = useCallback(
     (key: TaskCategory | string): string => {
@@ -372,13 +414,17 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
   );
 
   const renameCategoryLabel = useCallback(
-    (category: TaskCategory, label: string) => {
+    (category: TaskCategory, label: string): boolean => {
+      const trimmed = label.trim() || categoryLabels[category];
+      if (!trimmed) return false;
+      if (isCategoryLabelTaken(trimmed, category)) return false;
       setCategoryLabels((prev) => ({
         ...prev,
-        [category]: label.trim() || prev[category],
+        [category]: trimmed,
       }));
+      return true;
     },
-    [],
+    [categoryLabels, isCategoryLabelTaken],
   );
 
   const deleteCategoryAndTasks = useCallback(
@@ -429,6 +475,7 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
         deleteTask,
         updateTaskDate,
         updateTaskLocationReminder,
+        updateTaskReminders,
         addSubtask,
         deleteSubtask,
       }}

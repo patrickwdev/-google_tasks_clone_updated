@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Modal,
   Dimensions,
+  Alert,
 } from 'react-native';
 import {
   Home,
@@ -26,6 +27,7 @@ import { useAuth } from '../context/AuthContext';
 import AddTaskModal from '../components/AddTaskModal';
 import { supabase } from '../lib/supabase';
 import type { TaskCategory } from '../types/task';
+import { BUILT_IN_CATEGORY_KEYS } from '../types/task';
 
 type CategoryGridItem = {
   id: string;
@@ -36,16 +38,30 @@ type CategoryGridItem = {
   isCustom: boolean;
 };
 
+/** Each entry must have a unique categoryKey (add new key to TaskCategory in types/task.ts and to VALID_CATEGORIES + categoryLabels in TaskContext). */
 const BUILT_IN_CATEGORIES: CategoryGridItem[] = [
   { id: 'work', label: 'Work', accentColor: '#60A5FA', accentBg: '#1D4ED8', categoryKey: 'Work', isCustom: false },
   { id: 'personal', label: 'Personal', accentColor: '#A855F7', accentBg: '#5B21B6', categoryKey: 'Personal', isCustom: false },
   { id: 'shopping', label: 'Shopping', accentColor: '#FBBF24', accentBg: '#92400E', categoryKey: 'Shopping', isCustom: false },
   { id: 'fitness', label: 'Fitness', accentColor: '#34D399', accentBg: '#065F46', categoryKey: 'Health', isCustom: false },
-  { id: 'study', label: 'Study', accentColor: '#F97316', accentBg: '#9A3412', categoryKey: 'New', isCustom: false },
-  { id: 'home', label: 'Home', accentColor: '#38BDF8', accentBg: '#0E7490', categoryKey: 'Personal', isCustom: false },
+  { id: 'home', label: 'Home', accentColor: '#38BDF8', accentBg: '#0E7490', categoryKey: 'Home', isCustom: false },
 ];
 
+// Ensure every built-in category has a unique key and matches BUILT_IN_CATEGORY_KEYS
+const _builtInKeys = BUILT_IN_CATEGORIES.map((c) => c.categoryKey);
+const _keySet = new Set(_builtInKeys);
+if (_keySet.size !== _builtInKeys.length) {
+  throw new Error('BUILT_IN_CATEGORIES: every categoryKey must be unique.');
+}
+const _expectedSet = new Set(BUILT_IN_CATEGORY_KEYS);
+if (_keySet.size !== _expectedSet.size || [..._keySet].some((k) => !_expectedSet.has(k as TaskCategory))) {
+  throw new Error('BUILT_IN_CATEGORIES: categoryKeys must match BUILT_IN_CATEGORY_KEYS in types/task.ts.');
+}
+
 const CUSTOM_CATEGORY_ACCENT = { accentColor: '#8B5CF6', accentBg: '#4C1D95' };
+
+const LIST_PADDING_H = 16;
+const CARD_MARGIN_H = 4;
 
 export default function CategoriesScreen() {
   const router = useRouter();
@@ -63,6 +79,12 @@ export default function CategoriesScreen() {
   } = useTasks();
   const { user, isLoading: authLoading } = useAuth();
   const [isModalVisible, setIsModalVisible] = useState(false);
+
+  const { width: screenWidth } = Dimensions.get('window');
+  const cardWidth = useMemo(
+    () => (screenWidth - LIST_PADDING_H * 2 - CARD_MARGIN_H * 4) / 2,
+    [screenWidth],
+  );
   const [addCategoryPanelVisible, setAddCategoryPanelVisible] = useState(false);
   const [addCategoryName, setAddCategoryName] = useState('');
   const [categoryMenu, setCategoryMenu] = useState<{
@@ -165,33 +187,53 @@ export default function CategoriesScreen() {
       closeRenameModal();
       return;
     }
-    if (renameModal.categoryKey.startsWith('custom_')) {
-      renameCustomCategory(renameModal.categoryKey, trimmed);
-    } else {
-      const target = BUILT_IN_CATEGORIES.find((c) => c.id === renameModal.categoryId);
-      if (target) renameCategoryLabel(target.categoryKey as TaskCategory, trimmed);
-    }
-    closeRenameModal();
+    const ok = renameModal.categoryKey.startsWith('custom_')
+      ? renameCustomCategory(renameModal.categoryKey, trimmed)
+      : (() => {
+          const target = BUILT_IN_CATEGORIES.find((c) => c.id === renameModal.categoryId);
+          return target ? renameCategoryLabel(target.categoryKey as TaskCategory, trimmed) : false;
+        })();
+    if (ok) closeRenameModal();
+    else Alert.alert('Duplicate name', 'A category with this name already exists.');
   };
 
   const handleAddCategoryCreate = () => {
     const trimmed = addCategoryName.trim();
     if (!trimmed) return;
-    addCustomCategory(trimmed);
-    setAddCategoryName('');
-    setAddCategoryPanelVisible(false);
+    const ok = addCustomCategory(trimmed);
+    if (ok) {
+      setAddCategoryName('');
+      setAddCategoryPanelVisible(false);
+    } else {
+      Alert.alert('Duplicate name', 'A category with this name already exists.');
+    }
   };
 
   const renderCategory = ({ item }: { item: CategoryGridItem }) => {
     const count = taskCountsByCategory[item.categoryKey] ?? 0;
     const displayLabel = getCategoryLabel(item.categoryKey);
 
+    const openCategoryMenu = (e: { nativeEvent: { pageX: number; pageY: number } }) => {
+      const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+      const MENU_WIDTH = 168;
+      const MENU_HEIGHT = 96;
+      const MARGIN = 10;
+      const pressX = e.nativeEvent.pageX;
+      const pressY = e.nativeEvent.pageY;
+      const x = Math.min(pressX, screenWidth - MENU_WIDTH - MARGIN);
+      const y = Math.min(pressY, screenHeight - MENU_HEIGHT - MARGIN);
+      setCategoryMenu({
+        visible: true,
+        x: Math.max(MARGIN, x),
+        y: Math.max(MARGIN, y),
+        categoryId: item.id,
+        categoryKey: item.categoryKey,
+        categoryLabel: displayLabel,
+      });
+    };
+
     return (
-      <TouchableOpacity
-        style={styles.categoryCard}
-        activeOpacity={0.85}
-        onPress={() => router.push(`/categories/${item.categoryKey}`)}
-      >
+      <View style={[styles.categoryCard, { width: cardWidth, maxWidth: cardWidth }]}>
         <View style={styles.categoryCardHeader}>
           <TouchableOpacity
             style={styles.categoryDotsButton}
@@ -199,37 +241,23 @@ export default function CategoriesScreen() {
             hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
             accessibilityRole="button"
             accessibilityLabel={`Category options for ${displayLabel}`}
-            onPress={(e) => {
-              const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
-              const MENU_WIDTH = 168;
-              const MENU_HEIGHT = 96;
-              const MARGIN = 10;
-
-              const pressX = e.nativeEvent.pageX;
-              const pressY = e.nativeEvent.pageY;
-
-              const x = Math.min(pressX, screenWidth - MENU_WIDTH - MARGIN);
-              const y = Math.min(pressY, screenHeight - MENU_HEIGHT - MARGIN);
-
-              setCategoryMenu({
-                visible: true,
-                x: Math.max(MARGIN, x),
-                y: Math.max(MARGIN, y),
-                categoryId: item.id,
-                categoryKey: item.categoryKey,
-                categoryLabel: displayLabel,
-              });
-            }}
+            onPress={openCategoryMenu}
           >
             <MoreVertical size={18} color="#9CA3AF" />
           </TouchableOpacity>
         </View>
 
-        <Text style={styles.categoryTitle}>{displayLabel}</Text>
-        <Text style={styles.categorySubtitle}>
-          {count} task{count === 1 ? '' : 's'}
-        </Text>
-      </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.categoryCardContent}
+          activeOpacity={0.85}
+          onPress={() => router.push(`/categories/${item.categoryKey}`)}
+        >
+          <Text style={styles.categoryTitle}>{displayLabel}</Text>
+          <Text style={styles.categorySubtitle}>
+            {count} task{count === 1 ? '' : 's'}
+          </Text>
+        </TouchableOpacity>
+      </View>
     );
   };
 
@@ -252,7 +280,7 @@ export default function CategoriesScreen() {
             onPress={() => setAddCategoryPanelVisible(true)}
             accessibilityLabel="Add category"
           >
-            <MoreVertical size={20} color="#9CA3AF" />
+            <MoreVertical size={18} color="#9CA3AF" />
           </TouchableOpacity>
         </View>
 
@@ -274,7 +302,8 @@ export default function CategoriesScreen() {
         data={filteredGridData}
         keyExtractor={(item) => item.id}
         numColumns={2}
-        contentContainerStyle={styles.listContent}
+        initialNumToRender={20}
+        contentContainerStyle={[styles.listContent, { flexGrow: 1 }]}
         columnWrapperStyle={styles.columnWrapper}
         renderItem={renderCategory}
       />
@@ -554,7 +583,14 @@ const styles = StyleSheet.create({
     color: '#F9FAFB',
   },
   headerDotsButton: {
-    padding: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   searchBar: {
     marginTop: 4,
@@ -602,8 +638,19 @@ const styles = StyleSheet.create({
     marginTop: 12,
     marginBottom: 0,
   },
+  categoryCardContent: {
+    flex: 1,
+    justifyContent: 'center',
+  },
   categoryDotsButton: {
-    padding: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
     marginRight: -4,
   },
   categoryMenuOverlay: {

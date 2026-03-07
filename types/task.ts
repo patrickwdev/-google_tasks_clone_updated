@@ -1,5 +1,8 @@
 /** Category shown when creating a task and on the task detail screen */
-export type TaskCategory = 'Work' | 'Personal' | 'Shopping' | 'Health' | 'New';
+export type TaskCategory = 'Work' | 'Personal' | 'Shopping' | 'Health' | 'Home';
+
+/** Single source of truth for built-in category keys (each must be unique). Add new keys here and in TaskContext + categories BUILT_IN_CATEGORIES. */
+export const BUILT_IN_CATEGORY_KEYS: TaskCategory[] = ['Work', 'Personal', 'Shopping', 'Health', 'Home'];
 
 export type CategoryLabels = Record<TaskCategory, string>;
 
@@ -36,6 +39,8 @@ export interface Task {
   category?: TaskCategory | string;
   /** When set, user gets a notification when arriving near this location */
   locationReminder?: TaskLocationReminder;
+  /** Optional date/time reminders (e.g. "Remind me at 2:30 PM") */
+  reminders?: Date[];
   /** Optional list of sub-tasks */
   subtasks?: SubTask[];
 }
@@ -48,14 +53,14 @@ export type TaskContextType = {
   hiddenCategories: (TaskCategory | string)[];
   /** User-created categories (persisted per user) */
   customCategories: CustomCategory[];
-  /** Create a new custom category */
-  addCustomCategory: (label: string) => void;
-  /** Rename a custom category by id */
-  renameCustomCategory: (id: string, label: string) => void;
+  /** Create a new custom category. Returns false if a category with that name already exists. */
+  addCustomCategory: (label: string) => boolean;
+  /** Rename a custom category by id. Returns false if another category already has that name. */
+  renameCustomCategory: (id: string, label: string) => boolean;
   /** Get display label for any category key (built-in or custom) */
   getCategoryLabel: (key: TaskCategory | string) => string;
-  /** Rename the display label for a given category key (e.g. Work -> Deep Work) */
-  renameCategoryLabel: (category: TaskCategory, label: string) => void;
+  /** Rename the display label for a given category key. Returns false if another category already has that name. */
+  renameCategoryLabel: (category: TaskCategory, label: string) => boolean;
   /** Delete a whole category and all its tasks */
   deleteCategoryAndTasks: (category: TaskCategory | string) => void;
   addTask: (
@@ -64,13 +69,15 @@ export type TaskContextType = {
     date?: Date,
     locationReminder?: TaskLocationReminder,
     subtasks?: SubTask[],
-    category?: TaskCategory | string
+    category?: TaskCategory | string,
+    reminders?: Date[]
   ) => void;
   toggleTask: (id: string) => void;
   toggleSubtask: (taskId: string, subtaskId: string) => void;
   deleteTask: (id: string) => void;
   updateTaskDate: (taskId: string, date: Date) => void;
   updateTaskLocationReminder: (taskId: string, locationReminder: TaskLocationReminder | undefined) => void;
+  updateTaskReminders: (taskId: string, reminders: Date[]) => void;
   addSubtask: (taskId: string, title: string) => void;
   deleteSubtask: (taskId: string, subtaskId: string) => void;
 };

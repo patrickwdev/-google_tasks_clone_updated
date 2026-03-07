@@ -11,7 +11,13 @@ import {
 import '../lib/geofencing'; // Registers geofencing task and notification handler
 import { AuthProvider } from '../context/AuthContext';
 import { TaskProvider } from '../context/TaskContext';
-import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, ActivityIndicator, StyleSheet, LogBox } from 'react-native';
+
+// In Expo Go on Android, expo-notifications logs an error about *remote* push being removed.
+// This app only uses *local* notifications for "When I'm nearby", which still work in Expo Go.
+LogBox.ignoreLogs([
+  'expo-notifications: Android Push notifications (remote notifications)',
+]);
 import { Colors } from '../constants/Colors';
 import { useFrameworkReady } from '../hooks/useFrameworkReady';
 

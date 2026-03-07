@@ -130,13 +130,13 @@ export default function TaskItem({ task, onToggle, onDelete, onPress, onEdit }: 
       {onEdit ? (
         <View ref={dotsRef} collapsable={false}>
           <TouchableOpacity onPress={openPanel} style={styles.actionBtn}>
-            <MoreVertical size={18} color={Colors.light.textSecondary} />
+            <MoreVertical size={18} color="#9CA3AF" />
           </TouchableOpacity>
         </View>
       ) : null}
       {!onEdit ? (
         <TouchableOpacity onPress={() => onDelete(task.id)} style={styles.actionBtn}>
-          <Trash2 size={18} color={Colors.light.textSecondary} />
+          <Trash2 size={18} color="#9CA3AF" />
         </TouchableOpacity>
       ) : null}
 
@@ -330,7 +330,14 @@ const styles = StyleSheet.create({
     marginLeft: 20,
   },
   actionBtn: {
-    padding: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
     marginLeft: 4,
   },
   panelOverlay: {

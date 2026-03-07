@@ -58,7 +58,7 @@ export default function TaskDetailScreen() {
           style={styles.editButton}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
-          <MoreVertical size={22} color="#9CA3AF" />
+          <MoreVertical size={18} color="#9CA3AF" />
         </TouchableOpacity>
       </View>
 
@@ -142,17 +142,23 @@ export default function TaskDetailScreen() {
         ) : null}
 
         {/* Due date */}
-        {task.date ? (
-          <View style={styles.section}>
-            <View style={styles.sectionRow}>
-              <Calendar size={18} color="#9CA3AF" />
-              <Text style={styles.sectionLabel}>Due date</Text>
+        {task.date ? (() => {
+          const dueDate = task.date instanceof Date ? task.date : new Date(task.date);
+          const hasTime = dueDate.getHours() !== 0 || dueDate.getMinutes() !== 0;
+          return (
+            <View style={styles.section}>
+              <View style={styles.sectionRow}>
+                <Calendar size={18} color="#9CA3AF" />
+                <Text style={styles.sectionLabel}>Due date</Text>
+              </View>
+              <Text style={styles.dateText}>
+                {hasTime
+                  ? format(dueDate, "EEEE, MMMM d, yyyy 'at' h:mm a")
+                  : format(dueDate, 'EEEE, MMMM d, yyyy')}
+              </Text>
             </View>
-            <Text style={styles.dateText}>
-              {format(task.date instanceof Date ? task.date : new Date(task.date), 'EEEE, MMMM d, yyyy')}
-            </Text>
-          </View>
-        ) : null}
+          );
+        })() : null}
 
         {/* Location reminder */}
         {task.locationReminder ? (
@@ -203,7 +209,14 @@ const styles = StyleSheet.create({
     width: 40,
   },
   editButton: {
-    padding: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   scrollView: {
     flex: 1,

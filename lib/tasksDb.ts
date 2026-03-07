@@ -12,12 +12,42 @@ export interface TaskRow {
   list_id: string;
   category: string | null;
   location_reminder: TaskLocationReminder | null;
+  /** Present after migration 003; undefined if column not yet added */
+  reminders?: string[] | null;
   subtasks: SubTask[] | null;
   created_at: string;
   updated_at: string;
 }
 
+function parseRemindersFromRow(reminders: unknown): Date[] | undefined {
+  if (reminders == null) return undefined;
+  let arr: unknown[];
+  if (Array.isArray(reminders)) {
+    arr = reminders;
+  } else if (typeof reminders === 'string') {
+    try {
+      const parsed = JSON.parse(reminders) as unknown;
+      arr = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return undefined;
+    }
+  } else {
+    return undefined;
+  }
+  const dates = arr
+    .map((item) => {
+      if (typeof item === 'string') return new Date(item);
+      if (item instanceof Date) return item;
+      if (item != null && typeof item === 'object' && 'toISOString' in item) return new Date((item as Date).toISOString());
+      return null;
+    })
+    .filter((d): d is Date => d != null && !isNaN(d.getTime()));
+  return dates.length ? dates : undefined;
+}
+
 function rowToTask(row: TaskRow): Task {
+  const rawReminders = row.reminders ?? (row as unknown as Record<string, unknown>)['reminders'];
+  const reminders = parseRemindersFromRow(rawReminders);
   return {
     id: row.id,
     title: row.title,
@@ -27,12 +57,13 @@ function rowToTask(row: TaskRow): Task {
     listId: row.list_id,
     category: (row.category as Task['category']) ?? undefined,
     locationReminder: row.location_reminder ?? undefined,
+    reminders: reminders?.length ? reminders : undefined,
     subtasks: row.subtasks ?? undefined,
   };
 }
 
 function taskToRow(task: Partial<Task>, userId: string): Partial<TaskRow> {
-  return {
+  const row: Partial<TaskRow> = {
     title: task.title,
     details: task.details ?? null,
     is_completed: task.isCompleted ?? false,
@@ -43,6 +74,14 @@ function taskToRow(task: Partial<Task>, userId: string): Partial<TaskRow> {
     subtasks: task.subtasks ?? null,
     user_id: userId,
   };
+  // Only include reminders when set, so insert works if the DB hasn't run the reminders migration yet
+  if (task.reminders !== undefined) {
+    row.reminders =
+      task.reminders.length > 0
+        ? task.reminders.map((d) => (d instanceof Date ? d.toISOString() : new Date(d).toISOString()))
+        : [];
+  }
+  return row;
 }
 
 /** Fetch all tasks for the current user (requires auth) */
@@ -60,7 +99,7 @@ export async function fetchTasks(userId: string): Promise<Task[]> {
 /** Insert a new task; returns the created Task with id from Supabase */
 export async function insertTask(
   userId: string,
-  task: { title: string; details?: string; date?: Date; locationReminder?: TaskLocationReminder; subtasks?: SubTask[]; category?: Task['category'] }
+  task: { title: string; details?: string; date?: Date; locationReminder?: TaskLocationReminder; subtasks?: SubTask[]; category?: Task['category']; reminders?: Date[] }
 ): Promise<Task> {
   const row = taskToRow(
     {
@@ -71,6 +110,7 @@ export async function insertTask(
       listId: 'default',
       category: task.category,
       locationReminder: task.locationReminder,
+      reminders: task.reminders,
       subtasks: task.subtasks,
     },
     userId
@@ -86,7 +126,7 @@ export async function insertTask(
 export async function updateTask(
   userId: string,
   taskId: string,
-  patch: Partial<Pick<Task, 'title' | 'details' | 'isCompleted' | 'date' | 'listId' | 'category' | 'locationReminder' | 'subtasks'>>
+  patch: Partial<Pick<Task, 'title' | 'details' | 'isCompleted' | 'date' | 'listId' | 'category' | 'locationReminder' | 'reminders' | 'subtasks'>>
 ): Promise<void> {
   const row: Record<string, unknown> = {};
   if (patch.title !== undefined) row.title = patch.title;
@@ -96,6 +136,12 @@ export async function updateTask(
   if (patch.listId !== undefined) row.list_id = patch.listId;
   if (patch.category !== undefined) row.category = patch.category ?? null;
   if (patch.locationReminder !== undefined) row.location_reminder = patch.locationReminder ?? null;
+  if (patch.reminders !== undefined) {
+    row.reminders =
+      patch.reminders.length > 0
+        ? patch.reminders.map((d) => (d instanceof Date ? d.toISOString() : new Date(d).toISOString()))
+        : [];
+  }
   if (patch.subtasks !== undefined) row.subtasks = patch.subtasks ?? null;
 
   const { error } = await supabase

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -13,9 +13,18 @@ import {
   Switch,
   FlatList,
 } from 'react-native';
-import { Calendar, Plus, Check, Trash2, X, MapPin } from 'lucide-react-native';
+import { Calendar, Plus, Check, Trash2, X, MapPin, Clock, Bell } from 'lucide-react-native';
 import { Calendar as DateCalendar } from 'react-native-calendars';
 import { format } from 'date-fns';
+
+let DateTimePicker: React.ComponentType<any> | null = null;
+if (Platform.OS !== 'web') {
+  try {
+    DateTimePicker = require('@react-native-community/datetimepicker').default;
+  } catch {
+    // Native module not available
+  }
+}
 import { useTasks } from '../context/TaskContext';
 import { Colors } from '../constants/Colors';
 import * as Location from 'expo-location';
@@ -43,9 +52,27 @@ interface EditTaskPanelProps {
 }
 
 export default function EditTaskPanel({ visible, onClose, taskId }: EditTaskPanelProps) {
-  const { tasks, updateTaskDate, updateTaskLocationReminder, addSubtask, deleteSubtask, toggleSubtask } = useTasks();
+  const { tasks, updateTaskDate, updateTaskLocationReminder, updateTaskReminders, addSubtask, deleteSubtask, toggleSubtask } = useTasks();
   const task = tasks.find((t) => t.id === taskId);
+  const reminderList = useMemo(() => {
+    if (!task?.reminders) return [];
+    const r = task.reminders;
+    if (!Array.isArray(r)) return [];
+    return r
+      .map((x) => (x instanceof Date ? x : new Date(x)))
+      .filter((d) => !isNaN(d.getTime()));
+  }, [task?.id, task?.reminders]);
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [showReminderPicker, setShowReminderPicker] = useState(false);
+  const [reminderPanelDate, setReminderPanelDate] = useState<Date>(() => new Date());
+  const [reminderPanelTime, setReminderPanelTime] = useState<Date>(() => {
+    const d = new Date();
+    d.setHours(d.getHours() + 1, 0, 0, 0);
+    return d;
+  });
+  const [showReminderTimePicker, setShowReminderTimePicker] = useState(false);
+  const [reminderError, setReminderError] = useState<string | null>(null);
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
 
   // "When I'm nearby" state — sync from task when panel opens
@@ -226,8 +253,26 @@ export default function EditTaskPanel({ visible, onClose, taskId }: EditTaskPane
   const handleDateSelect = (day: { dateString: string }) => {
     if (!task || day.dateString < minDate) return;
     const [y, m, dayNum] = day.dateString.split('-').map(Number);
-    updateTaskDate(task.id, new Date(y, m - 1, dayNum));
+    const base = taskDate ?? new Date();
+    const next = new Date(y, m - 1, dayNum, base.getHours(), base.getMinutes(), 0, 0);
+    updateTaskDate(task.id, next);
     setShowDatePicker(false);
+  };
+
+  const handleTimeSelect = (t: Date) => {
+    if (!task || !taskDate) return;
+    const next = new Date(taskDate);
+    next.setHours(t.getHours(), t.getMinutes(), 0, 0);
+    updateTaskDate(task.id, next);
+    setShowTimePicker(false);
+  };
+
+  const handleClearTime = () => {
+    if (!task || !taskDate) return;
+    const next = new Date(taskDate);
+    next.setHours(0, 0, 0, 0);
+    updateTaskDate(task.id, next);
+    setShowTimePicker(false);
   };
 
   const handleAddSubtask = () => {
@@ -318,6 +363,122 @@ export default function EditTaskPanel({ visible, onClose, taskId }: EditTaskPane
                       : 'Tap to set due date'}
                   </Text>
                 </TouchableOpacity>
+              </View>
+
+              {taskDate ? (
+                <View style={styles.section}>
+                  <Text style={styles.sectionLabel}>Due time</Text>
+                  <TouchableOpacity
+                    style={styles.dateCard}
+                    onPress={() => setShowTimePicker(true)}
+                    activeOpacity={0.8}
+                  >
+                    <Clock size={20} color="#BFDBFE" />
+                    <Text style={styles.dateCardText}>
+                      {taskDate.getHours() !== 0 || taskDate.getMinutes() !== 0
+                        ? format(taskDate, 'h:mm a')
+                        : 'Tap to set time'}
+                    </Text>
+                  </TouchableOpacity>
+                  {DateTimePicker && (
+                    <TouchableOpacity
+                      style={styles.dateOnlyLink}
+                      onPress={handleClearTime}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={styles.dateOnlyLinkText}>No time (date only)</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              ) : null}
+
+              {/* Reminder — tap to open panel; disabled when due date is date-only (no time) */}
+              <View style={styles.section}>
+                <Text style={styles.sectionLabel}>Reminder</Text>
+                <TouchableOpacity
+                  style={[
+                    styles.reminderCard,
+                    taskDate &&
+                      taskDate.getHours() === 0 &&
+                      taskDate.getMinutes() === 0 &&
+                      styles.reminderCardDisabled,
+                  ]}
+                  onPress={() => {
+                    if (
+                      taskDate &&
+                      taskDate.getHours() === 0 &&
+                      taskDate.getMinutes() === 0
+                    )
+                      return;
+                    if (reminderList.length > 0) {
+                      const last = reminderList[reminderList.length - 1];
+                      setReminderPanelDate(last);
+                      setReminderPanelTime(last);
+                    } else {
+                      setReminderPanelDate(new Date());
+                      const inOne = new Date();
+                      inOne.setHours(inOne.getHours() + 1, 0, 0, 0);
+                      setReminderPanelTime(inOne);
+                    }
+                    setShowReminderTimePicker(false);
+                    setReminderError(null);
+                    setShowReminderPicker(true);
+                  }}
+                  activeOpacity={0.8}
+                  disabled={
+                    !!(
+                      taskDate &&
+                      taskDate.getHours() === 0 &&
+                      taskDate.getMinutes() === 0
+                    )
+                  }
+                >
+                  <Bell
+                    size={20}
+                    color={
+                      taskDate &&
+                      taskDate.getHours() === 0 &&
+                      taskDate.getMinutes() === 0
+                        ? '#6B7280'
+                        : '#BFDBFE'
+                    }
+                  />
+                  <Text style={styles.dateCardText}>
+                    {taskDate &&
+                    taskDate.getHours() === 0 &&
+                    taskDate.getMinutes() === 0
+                      ? 'Not available for date-only tasks'
+                      : reminderList.length === 0
+                        ? 'Tap to add reminders'
+                        : reminderList.length === 1
+                          ? reminderList[0].toLocaleString(undefined, {
+                              dateStyle: 'short',
+                              timeStyle: 'short',
+                            })
+                          : `${reminderList.length} reminders`}
+                  </Text>
+                </TouchableOpacity>
+                {task && reminderList.length > 0 ? (
+                  <View style={styles.reminderListUnderCard}>
+                    {reminderList.map((d, i) => (
+                        <View key={i} style={styles.reminderRowUnderCard}>
+                          <Text style={styles.reminderListUnderCardText}>
+                            {d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}
+                          </Text>
+                          <TouchableOpacity
+                            onPress={() => {
+                              const next = reminderList.filter((_, j) => j !== i);
+                              updateTaskReminders(task.id, next);
+                            }}
+                            style={styles.reminderDeleteUnderCard}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          >
+                            <Trash2 size={18} color={Colors.light.textSecondary} />
+                          </TouchableOpacity>
+                        </View>
+                    ))}
+                  </View>
+                ) : null}
               </View>
 
               <View style={styles.section}>
@@ -522,6 +683,263 @@ export default function EditTaskPanel({ visible, onClose, taskId }: EditTaskPane
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      {/* Due time picker — Android uses native dialog */}
+      {Platform.OS === 'android' && showTimePicker && DateTimePicker && taskDate && (
+        <DateTimePicker
+          value={taskDate}
+          mode="time"
+          minimumDate={
+            formatDateString(taskDate) === todayString ? new Date() : undefined
+          }
+          onChange={(_, t) => {
+            if (t) handleTimeSelect(t);
+            setShowTimePicker(false);
+          }}
+          display="default"
+        />
+      )}
+
+      {/* Due time picker modal — iOS and web */}
+      {Platform.OS !== 'android' && (
+        <Modal
+          visible={showTimePicker}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowTimePicker(false)}
+        >
+          <TouchableOpacity
+            style={styles.datePickerOverlay}
+            activeOpacity={1}
+            onPress={() => setShowTimePicker(false)}
+          >
+            <TouchableOpacity
+              style={styles.datePickerPopup}
+              activeOpacity={1}
+              onPress={(e) => e.stopPropagation()}
+            >
+              <View style={styles.datePickerHeader}>
+                <Text style={styles.datePickerTitle}>Due time</Text>
+                <TouchableOpacity
+                  onPress={() => setShowTimePicker(false)}
+                  style={styles.datePickerCloseBtn}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <X size={20} color="#9CA3AF" />
+                </TouchableOpacity>
+              </View>
+              <View style={styles.datePickerContent}>
+                {DateTimePicker && taskDate ? (
+                  <>
+                    <DateTimePicker
+                      value={taskDate}
+                      mode="time"
+                      minimumDate={
+                        formatDateString(taskDate) === todayString ? new Date() : undefined
+                      }
+                      onChange={(_, t) => t && handleTimeSelect(t)}
+                      display="spinner"
+                      themeVariant="dark"
+                      style={styles.timePicker}
+                    />
+                    <TouchableOpacity
+                      style={styles.timePickerDone}
+                      onPress={() => setShowTimePicker(false)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={styles.timePickerDoneText}>Done</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <Text style={styles.timePickerWebHint}>
+                    Set due time in the iOS or Android app.
+                  </Text>
+                )}
+              </View>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </Modal>
+      )}
+
+      {/* Reminder slide-up panel */}
+      <Modal
+        visible={showReminderPicker}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowReminderPicker(false)}
+      >
+        <TouchableWithoutFeedback
+          onPress={() => {
+            setReminderError(null);
+            setShowReminderPicker(false);
+          }}
+        >
+          <View style={styles.reminderOverlay} />
+        </TouchableWithoutFeedback>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.reminderKeyboardView}
+        >
+          <TouchableWithoutFeedback>
+            <View style={styles.reminderPanel}>
+              <View style={styles.handleWrapper}>
+                <View style={styles.handle} />
+              </View>
+              <View style={styles.reminderPanelHeader}>
+                <Text style={styles.reminderPanelTitle}>Reminders</Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    setReminderError(null);
+                    setShowReminderPicker(false);
+                  }}
+                  style={styles.datePickerCloseBtn}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <X size={22} color="#9CA3AF" />
+                </TouchableOpacity>
+              </View>
+              <View style={styles.reminderPanelContent}>
+                {task && reminderList.length > 0 ? (
+                  <View style={styles.reminderListSection}>
+                    <Text style={styles.reminderSectionLabel}>Your reminders</Text>
+                    {reminderList.map((d, i) => (
+                        <View key={i} style={styles.reminderListItem}>
+                          <Text style={styles.reminderListItemText}>
+                            {d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}
+                          </Text>
+                          <TouchableOpacity
+                            onPress={() => {
+                              const next = reminderList.filter((_, j) => j !== i);
+                              updateTaskReminders(task.id, next);
+                            }}
+                            style={styles.reminderListDelete}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          >
+                            <Trash2 size={18} color="#9CA3AF" />
+                          </TouchableOpacity>
+                        </View>
+                    ))}
+                  </View>
+                ) : null}
+                <Text style={styles.reminderSectionLabel}>Date</Text>
+                <DateCalendar
+                  minDate={todayString}
+                  maxDate={taskDate ? formatDateString(taskDate) : undefined}
+                  current={formatDateString(reminderPanelDate)}
+                  initialDate={formatDateString(reminderPanelDate)}
+                  onDayPress={(day) => {
+                    setReminderError(null);
+                    const [y, m, dayNum] = day.dateString.split('-').map(Number);
+                    setReminderPanelDate(new Date(y, m - 1, dayNum));
+                  }}
+                  markedDates={{
+                    [formatDateString(reminderPanelDate)]: {
+                      selected: true,
+                      selectedColor: '#2563EB',
+                      selectedTextColor: '#FFFFFF',
+                    },
+                  }}
+                  theme={calendarTheme}
+                  style={styles.reminderCalendar}
+                />
+                <Text style={[styles.reminderSectionLabel, styles.reminderTimeLabel]}>Time</Text>
+                {!DateTimePicker ? (
+                  <Text style={styles.reminderWebHint}>Set reminder time on the iOS or Android app.</Text>
+                ) : Platform.OS === 'android' && !showReminderTimePicker ? (
+                  <TouchableOpacity
+                    style={styles.reminderTimeRow}
+                    onPress={() => setShowReminderTimePicker(true)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.reminderTimeRowText}>
+                      {reminderPanelTime.toLocaleTimeString(undefined, {
+                        hour: 'numeric',
+                        minute: '2-digit',
+                      })}
+                    </Text>
+                    <Text style={styles.reminderSetTimeText}>Set time</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <View style={styles.reminderTimePickerWrap}>
+                    {(Platform.OS !== 'android' || showReminderTimePicker) && (
+                      <DateTimePicker
+                        value={reminderPanelTime}
+                        mode="time"
+                        minimumDate={
+                          formatDateString(reminderPanelDate) === todayString ? new Date() : undefined
+                        }
+                        onChange={(_, t) => {
+                          if (t) {
+                            setReminderError(null);
+                            setReminderPanelTime(t);
+                          }
+                          if (Platform.OS === 'android') setShowReminderTimePicker(false);
+                        }}
+                        display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                        themeVariant="dark"
+                        style={Platform.OS === 'android' ? undefined : styles.reminderTimePicker}
+                      />
+                    )}
+                  </View>
+                )}
+                {reminderError ? (
+                  <Text style={styles.reminderValidationError}>{reminderError}</Text>
+                ) : null}
+                <TouchableOpacity
+                  style={styles.reminderPanelAdd}
+                  onPress={() => {
+                    if (!task) return;
+                    const combined = new Date(reminderPanelDate);
+                    combined.setHours(
+                      reminderPanelTime.getHours(),
+                      reminderPanelTime.getMinutes(),
+                      0,
+                      0,
+                    );
+                    const now = new Date();
+                    if (combined.getTime() < now.getTime()) {
+                      setReminderError('That time has already passed. Pick a later time.');
+                      return;
+                    }
+                    if (taskDate) {
+                      const dueDateTime = taskDate.getTime();
+                      if (combined.getTime() > dueDateTime) {
+                        setReminderError('Reminder must be before the due date and time.');
+                        return;
+                      }
+                    }
+                    const sameTimeOfDay = reminderList.some(
+                      (r) => r.getHours() === combined.getHours() && r.getMinutes() === combined.getMinutes()
+                    );
+                    if (sameTimeOfDay) {
+                      setReminderError('A reminder at this time already exists. Pick a different time.');
+                      setTimeout(() => setReminderError(null), 1000);
+                      return;
+                    }
+                    setReminderError(null);
+                    const next = [...reminderList, combined].sort((a, b) => a.getTime() - b.getTime());
+                    updateTaskReminders(task.id, next);
+                    const nextDate = new Date(combined);
+                    nextDate.setMinutes(nextDate.getMinutes() + 30, 0, 0);
+                    setReminderPanelDate(nextDate);
+                    setReminderPanelTime(nextDate);
+                  }}
+                  activeOpacity={0.9}
+                >
+                  <Text style={styles.timePickerDoneText}>Add reminder</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.reminderPanelDone}
+                  onPress={() => setShowReminderPicker(false)}
+                  activeOpacity={0.9}
+                >
+                  <Text style={styles.reminderPanelDoneText}>Done</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
+      </Modal>
     </Modal>
   );
 }
@@ -621,6 +1039,52 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: 'Inter_500Medium',
     color: '#E5E7EB',
+  },
+  dateOnlyLink: {
+    marginTop: 10,
+    paddingVertical: 8,
+    alignSelf: 'flex-start',
+  },
+  dateOnlyLinkText: {
+    fontSize: 14,
+    fontFamily: 'Inter_500Medium',
+    color: '#60A5FA',
+  },
+  reminderCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#0F172A',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: '#1E293B',
+  },
+  reminderCardDisabled: {
+    opacity: 0.6,
+  },
+  reminderListUnderCard: {
+    marginTop: 10,
+    paddingLeft: 4,
+  },
+  reminderRowUnderCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+    paddingVertical: 6,
+    paddingRight: 4,
+    paddingLeft: 0,
+  },
+  reminderListUnderCardText: {
+    fontSize: 14,
+    fontFamily: 'Inter_500Medium',
+    color: '#9CA3AF',
+    flex: 1,
+  },
+  reminderDeleteUnderCard: {
+    padding: 4,
   },
   subtaskList: {
     marginBottom: 12,
@@ -746,6 +1210,29 @@ const styles = StyleSheet.create({
   },
   calendar: {
     marginBottom: 8,
+  },
+  timePicker: {
+    alignSelf: 'center',
+    marginVertical: 8,
+  },
+  timePickerDone: {
+    marginTop: 12,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#2563EB',
+    alignItems: 'center',
+  },
+  timePickerDoneText: {
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#EFF6FF',
+  },
+  timePickerWebHint: {
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+    color: '#9CA3AF',
+    textAlign: 'center',
+    paddingVertical: 16,
   },
   sectionCard: {
     flexDirection: 'row',
@@ -894,5 +1381,144 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'Inter_500Medium',
     color: '#E5E7EB',
+  },
+  reminderOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.75)',
+  },
+  reminderKeyboardView: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+  },
+  reminderPanel: {
+    backgroundColor: '#020617',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+    maxHeight: '85%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 18,
+    elevation: 30,
+  },
+  reminderPanelHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  reminderPanelTitle: {
+    fontSize: 18,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#E5E7EB',
+    flex: 1,
+  },
+  reminderPanelContent: {
+    paddingBottom: 8,
+  },
+  reminderSectionLabel: {
+    fontSize: 12,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#9CA3AF',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+  reminderListSection: {
+    marginBottom: 16,
+  },
+  reminderListItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#0F172A',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: '#1F2937',
+  },
+  reminderListItemText: {
+    fontSize: 14,
+    fontFamily: 'Inter_500Medium',
+    color: '#E5E7EB',
+  },
+  reminderListDelete: {
+    padding: 4,
+  },
+  reminderCalendar: {
+    marginBottom: 8,
+  },
+  reminderTimeLabel: {
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  reminderWebHint: {
+    fontSize: 12,
+    fontFamily: 'Inter_400Regular',
+    color: '#9CA3AF',
+    marginBottom: 16,
+  },
+  reminderTimeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#0F172A',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#1F2937',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 16,
+  },
+  reminderTimeRowText: {
+    fontSize: 16,
+    fontFamily: 'Inter_500Medium',
+    color: '#E5E7EB',
+  },
+  reminderSetTimeText: {
+    fontSize: 14,
+    fontFamily: 'Inter_500Medium',
+    color: '#60A5FA',
+  },
+  reminderTimePickerWrap: {
+    marginBottom: 16,
+  },
+  reminderTimePicker: {
+    alignSelf: 'center',
+  },
+  reminderValidationError: {
+    fontSize: 13,
+    fontFamily: 'Inter_500Medium',
+    color: '#F87171',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  reminderPanelAdd: {
+    marginTop: 4,
+    paddingVertical: 14,
+    borderRadius: 999,
+    backgroundColor: '#2563EB',
+    alignItems: 'center',
+  },
+  reminderPanelDone: {
+    marginTop: 10,
+    paddingVertical: 12,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#374151',
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+  },
+  reminderPanelDoneText: {
+    fontSize: 15,
+    fontFamily: 'Inter_500Medium',
+    color: '#9CA3AF',
   },
 });
