@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal, TouchableWithoutFeedback, Dimensions } from 'react-native';
-import { Check, Trash2, MapPin, MoreVertical, ListChecks } from 'lucide-react-native';
+import { Check, Trash2, MapPin, MoreVertical, ListChecks, Bell, Calendar } from 'lucide-react-native';
 import { Colors } from '../constants/Colors';
 import { Task } from '../types/task';
 import { format } from 'date-fns';
@@ -63,9 +63,37 @@ export default function TaskItem({ task, onToggle, onDelete, onPress, onEdit }: 
       )}
       {task.date && (
         <View style={styles.dateContainer}>
+          <Calendar size={12} color="#BFDBFE" />
           <Text style={styles.dateText}>
-            {format(new Date(task.date), 'EEE, MMM d')}
+            {(() => {
+              const d = new Date(task.date);
+              const hasTime = d.getHours() !== 0 || d.getMinutes() !== 0;
+              return hasTime
+                ? format(d, "EEE, MMM d 'at' h:mm a")
+                : format(d, 'EEE, MMM d');
+            })()}
           </Text>
+        </View>
+      )}
+      {task.reminders && task.reminders.length > 0 && (
+        <View style={styles.remindersContainer}>
+          <Bell size={12} color="#93C5FD" />
+          <View style={styles.remindersList}>
+            {task.reminders.slice(0, 2).map((reminderDate, index) => {
+              const d = reminderDate instanceof Date ? reminderDate : new Date(reminderDate);
+              const hasTime = d.getHours() !== 0 || d.getMinutes() !== 0;
+              return (
+                <Text key={index} style={styles.reminderText} numberOfLines={1}>
+                  {hasTime
+                    ? format(d, "EEE, MMM d 'at' h:mm a")
+                    : format(d, 'EEE, MMM d')}
+                </Text>
+              );
+            })}
+            {task.reminders.length > 2 && (
+              <Text style={styles.reminderMore}>+{task.reminders.length - 2} more</Text>
+            )}
+          </View>
         </View>
       )}
       {task.locationReminder && (
@@ -255,6 +283,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
   },
   dateText: {
     fontSize: 12,
@@ -264,6 +293,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
     backgroundColor: '#1D4ED8',
+  },
+  remindersContainer: {
+    marginTop: 6,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+  },
+  remindersList: {
+    flex: 1,
+  },
+  reminderText: {
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+    color: '#93C5FD',
+    marginBottom: 2,
+  },
+  reminderMore: {
+    fontSize: 11,
+    fontFamily: 'Inter_500Medium',
+    color: '#6B7280',
   },
   locationContainer: {
     marginTop: 6,
