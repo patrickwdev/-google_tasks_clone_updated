@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 
@@ -12,11 +13,14 @@ function getTaskIdFromNotification(data: Record<string, unknown> | null): string
  * Listens for notification taps and navigates to the task detail screen when
  * the notification has a taskId (reminder or location reminder). Also handles
  * app opened from a notification (e.g. app was killed).
+ * No-op on web (expo-notifications is not supported there).
  */
 export function useNotificationNavigation() {
   const router = useRouter();
 
   useEffect(() => {
+    if (Platform.OS === 'web') return;
+
     const navigateToTask = (taskId: string) => {
       router.push(`/task/${taskId}`);
     };
