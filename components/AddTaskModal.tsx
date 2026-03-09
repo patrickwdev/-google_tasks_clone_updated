@@ -46,6 +46,10 @@ import {
 interface AddTaskModalProps {
   visible: boolean;
   onClose: () => void;
+  /** When set, the modal opens with this date pre-selected (e.g. from calendar day panel). */
+  initialDate?: Date;
+  /** When true, render only the form content (no Modal wrapper). Used when embedding inside AddItemModal. */
+  embedInPanel?: boolean;
   onAdd: (
     title: string,
     details?: string,
@@ -57,7 +61,7 @@ interface AddTaskModalProps {
   ) => void;
 }
 
-export default function AddTaskModal({ visible, onClose, onAdd }: AddTaskModalProps) {
+export default function AddTaskModal({ visible, onClose, initialDate, embedInPanel, onAdd }: AddTaskModalProps) {
   const { categoryLabels, hiddenCategories, customCategories, getCategoryLabel } = useTasks();
   const [title, setTitle] = useState('');
   const [details, setDetails] = useState('');
@@ -175,6 +179,11 @@ export default function AddTaskModal({ visible, onClose, onAdd }: AddTaskModalPr
     const id = setTimeout(() => setDueTimeError(null), 1000);
     return () => clearTimeout(id);
   }, [dueTimeError]);
+
+  // When opened with initialDate (e.g. from calendar day panel), pre-fill the due date
+  useEffect(() => {
+    if (visible && initialDate) setDate(initialDate);
+  }, [visible, initialDate]);
 
   const handleSelectSuggestion = async (suggestion: PlaceSuggestion) => {
     setShowSuggestions(false);
@@ -318,43 +327,32 @@ export default function AddTaskModal({ visible, onClose, onAdd }: AddTaskModalPr
     textDayHeaderFontSize: 12,
   };
 
-  return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      transparent={true}
-      onRequestClose={onClose}
+  const formContent = (
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={embedInPanel ? styles.keyboardViewEmbed : styles.keyboardView}
     >
-      <TouchableWithoutFeedback onPress={onClose}>
-        <View style={styles.overlay} />
-      </TouchableWithoutFeedback>
-
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboardView}
-      >
-        <View style={styles.container}>
-          {/* Handle */}
-          <View style={styles.handleWrapper}>
-            <View style={styles.handle} />
-          </View>
-
-          {/* Header */}
-          <View style={styles.headerRow}>
-            <TouchableOpacity onPress={onClose} style={styles.iconButton}>
-              <X size={20} color="#9CA3AF" />
-            </TouchableOpacity>
-
-            <Text style={styles.headerTitle}>Add New Task</Text>
-
-            <TouchableOpacity
-              onPress={resetForm}
-              style={styles.clearButton}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Text style={styles.clearText}>Clear</Text>
-            </TouchableOpacity>
-          </View>
+      <View style={[styles.container, embedInPanel && styles.containerEmbed]}>
+        {!embedInPanel && (
+          <>
+            <View style={styles.handleWrapper}>
+              <View style={styles.handle} />
+            </View>
+            <View style={styles.headerRow}>
+              <TouchableOpacity onPress={onClose} style={styles.iconButton}>
+                <X size={20} color="#9CA3AF" />
+              </TouchableOpacity>
+              <Text style={styles.headerTitle}>Add New Task</Text>
+              <TouchableOpacity
+                onPress={resetForm}
+                style={styles.clearButton}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={styles.clearText}>Clear</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
 
           {/* Task name */}
           <View style={styles.section}>
@@ -662,7 +660,10 @@ export default function AddTaskModal({ visible, onClose, onAdd }: AddTaskModalPr
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+  );
 
+  const subModals = (
+    <>
       {/* Date picker popup */}
       <Modal
         visible={showDatePicker}
@@ -1049,6 +1050,25 @@ export default function AddTaskModal({ visible, onClose, onAdd }: AddTaskModalPr
           </TouchableWithoutFeedback>
         </KeyboardAvoidingView>
       </Modal>
+    </>
+  );
+
+  if (embedInPanel) {
+    return (
+      <>
+        {formContent}
+        {subModals}
+      </>
+    );
+  }
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <TouchableWithoutFeedback onPress={onClose}>
+        <View style={styles.overlay} />
+      </TouchableWithoutFeedback>
+      {formContent}
+      {subModals}
     </Modal>
   );
 }
@@ -1064,6 +1084,9 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
   },
+  keyboardViewEmbed: {
+    flex: 1,
+  },
   container: {
     backgroundColor: '#020617',
     borderTopLeftRadius: 28,
@@ -1076,6 +1099,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 18,
     elevation: 30,
+  },
+  containerEmbed: {
+    paddingTop: 0,
+    shadowOpacity: 0,
+    elevation: 0,
   },
   handleWrapper: {
     alignItems: 'center',

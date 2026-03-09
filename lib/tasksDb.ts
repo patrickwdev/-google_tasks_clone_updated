@@ -15,6 +15,10 @@ export interface TaskRow {
   /** Present after migration 003; undefined if column not yet added */
   reminders?: string[] | null;
   subtasks: SubTask[] | null;
+  /** 'event' | 'task'; undefined if column not yet added */
+  item_type?: string | null;
+  /** false = event not shown on calendar grid; undefined/null = treat as true */
+  on_calendar?: boolean | null;
   created_at: string;
   updated_at: string;
 }
@@ -59,6 +63,8 @@ function rowToTask(row: TaskRow): Task {
     locationReminder: row.location_reminder ?? undefined,
     reminders: reminders?.length ? reminders : undefined,
     subtasks: row.subtasks ?? undefined,
+    itemType: row.item_type === 'event' ? 'event' : row.item_type === 'task' ? 'task' : undefined,
+    onCalendar: row.on_calendar === false ? false : row.on_calendar === true ? true : undefined,
   };
 }
 
@@ -81,6 +87,12 @@ function taskToRow(task: Partial<Task>, userId: string): Partial<TaskRow> {
         ? task.reminders.map((d) => (d instanceof Date ? d.toISOString() : new Date(d).toISOString()))
         : [];
   }
+  if (task.itemType !== undefined) {
+    (row as TaskRow).item_type = task.itemType;
+  }
+  if (task.itemType === 'event' && task.onCalendar !== undefined) {
+    (row as TaskRow).on_calendar = task.onCalendar;
+  }
   return row;
 }
 
@@ -99,7 +111,7 @@ export async function fetchTasks(userId: string): Promise<Task[]> {
 /** Insert a new task; returns the created Task with id from Supabase */
 export async function insertTask(
   userId: string,
-  task: { title: string; details?: string; date?: Date; locationReminder?: TaskLocationReminder; subtasks?: SubTask[]; category?: Task['category']; reminders?: Date[] }
+  task: { title: string; details?: string; date?: Date; locationReminder?: TaskLocationReminder; subtasks?: SubTask[]; category?: Task['category']; reminders?: Date[]; itemType?: 'task' | 'event'; onCalendar?: boolean }
 ): Promise<Task> {
   const row = taskToRow(
     {
@@ -112,6 +124,8 @@ export async function insertTask(
       locationReminder: task.locationReminder,
       reminders: task.reminders,
       subtasks: task.subtasks,
+      itemType: task.itemType,
+      onCalendar: task.onCalendar,
     },
     userId
   );

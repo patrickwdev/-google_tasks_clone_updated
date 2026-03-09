@@ -43,6 +43,10 @@ export interface Task {
   reminders?: Date[];
   /** Optional list of sub-tasks */
   subtasks?: SubTask[];
+  /** When 'event', created from the Event form; shown on calendar under the date. Omitted or 'task' for regular tasks. */
+  itemType?: 'task' | 'event';
+  /** When false, event has a date (for the event list) but is not shown on the calendar grid. Only for events. */
+  onCalendar?: boolean;
 }
 
 export type TaskContextType = {
@@ -70,7 +74,9 @@ export type TaskContextType = {
     locationReminder?: TaskLocationReminder,
     subtasks?: SubTask[],
     category?: TaskCategory | string,
-    reminders?: Date[]
+    reminders?: Date[],
+    itemType?: 'task' | 'event',
+    onCalendar?: boolean
   ) => void;
   toggleTask: (id: string) => void;
   toggleSubtask: (taskId: string, subtaskId: string) => void;

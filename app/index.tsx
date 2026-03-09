@@ -5,9 +5,9 @@ import {
   Text,
   SectionList,
   TouchableOpacity,
-  SafeAreaView,
   ActivityIndicator,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   Plus,
   Home,
@@ -58,7 +58,7 @@ export default function TasksScreen() {
   }, [authLoading, user, router]);
 
   const incompleteCount = useMemo(
-    () => tasks.filter((t) => !t.isCompleted).length,
+    () => tasks.filter((t) => t.itemType !== 'event' && !t.isCompleted).length,
     [tasks]
   );
   const weekDays = useMemo(() => {
@@ -68,6 +68,7 @@ export default function TasksScreen() {
   // All hooks must run before any early return (Rules of Hooks)
   const tasksForSelectedDay = useMemo(() => {
     return tasks.filter((t) => {
+      if (t.itemType === 'event') return false;
       if (!t.date) return false;
       const taskDate = t.date instanceof Date ? t.date : new Date(t.date);
       return isSameDay(taskDate, selectedDate);
@@ -132,7 +133,7 @@ export default function TasksScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerTop}>

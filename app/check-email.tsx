@@ -1,11 +1,11 @@
 import React from 'react';
 import {
-  SafeAreaView,
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Mail, ChevronLeft } from 'lucide-react-native';
 
@@ -18,7 +18,7 @@ export default function CheckEmailScreen() {
     : "Check your email and confirm your account. Once you've tapped the link, you'll be signed in and taken to the home screen.";
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <TouchableOpacity
         onPress={() => router.replace('/login')}
         style={styles.backButton}

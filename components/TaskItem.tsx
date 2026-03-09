@@ -131,15 +131,19 @@ export default function TaskItem({ task, onToggle, onDelete, onPress, onEdit }: 
     </>
   );
 
+  const isEvent = task.itemType === 'event';
+
   return (
-    <View style={styles.container}>
-      <TouchableOpacity
-        style={[styles.checkbox, task.isCompleted && styles.checkboxChecked]}
-        onPress={() => onToggle(task.id)}
-        activeOpacity={0.6}
-      >
-        {task.isCompleted && <Check size={16} color="#FFF" strokeWidth={3} />}
-      </TouchableOpacity>
+    <View style={[styles.container, isEvent && styles.containerEvent]}>
+      {!isEvent && (
+        <TouchableOpacity
+          style={[styles.checkbox, task.isCompleted && styles.checkboxChecked]}
+          onPress={() => onToggle(task.id)}
+          activeOpacity={0.6}
+        >
+          {task.isCompleted && <Check size={16} color="#FFF" strokeWidth={3} />}
+        </TouchableOpacity>
+      )}
 
       <View style={styles.content}>
         {onPress ? (
@@ -224,6 +228,16 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderWidth: 1,
     borderColor: '#111827',
+  },
+  containerEvent: {
+    backgroundColor: 'transparent',
+    borderRadius: 0,
+    borderWidth: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1F2937',
+    marginBottom: 0,
+    paddingVertical: 12,
+    paddingHorizontal: 0,
   },
   checkbox: {
     width: 24,

@@ -9,6 +9,7 @@ import {
   Inter_700Bold,
 } from '@expo-google-fonts/inter';
 import '../lib/geofencing'; // Registers geofencing task and notification handler
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider } from '../context/AuthContext';
 import { TaskProvider } from '../context/TaskContext';
 import { View, Text, ActivityIndicator, StyleSheet, LogBox } from 'react-native';
@@ -64,10 +65,11 @@ export default function RootLayout() {
   }
 
   return (
-    <AuthProvider>
-      <TaskProvider>
-        <NotificationNavigationHandler />
-        <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
+    <SafeAreaProvider>
+      <AuthProvider>
+        <TaskProvider>
+          <NotificationNavigationHandler />
+          <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="login" />
         <Stack.Screen name="create-account" />
@@ -78,8 +80,9 @@ export default function RootLayout() {
         <Stack.Screen name="settings" />
         </Stack>
         <StatusBar style="dark" backgroundColor="transparent" />
-      </TaskProvider>
-    </AuthProvider>
+        </TaskProvider>
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }
 

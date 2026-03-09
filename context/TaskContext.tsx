@@ -182,7 +182,9 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
       locationReminder?: TaskLocationReminder,
       subtasks?: SubTask[],
       category?: TaskCategory | string,
-      reminders?: Date[]
+      reminders?: Date[],
+      itemType?: 'task' | 'event',
+      onCalendar?: boolean
     ) => {
       const sortedReminders = reminders?.length
         ? [...reminders].sort((a, b) => a.getTime() - b.getTime())
@@ -200,11 +202,19 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
           locationReminder,
           reminders: sortedReminders,
           subtasks: subtasks?.length ? subtasks : undefined,
+          itemType,
+          onCalendar,
         };
         setTasks((prev) => [tempTask, ...prev]);
-        insertTask(user.id, { title, details, date, locationReminder, subtasks, category, reminders: sortedReminders })
+        insertTask(user.id, { title, details, date, locationReminder, subtasks, category, reminders: sortedReminders, itemType, onCalendar })
           .then((created) => {
-            setTasks((prev) => prev.map((t) => (t.id === tempId ? created : t)));
+            setTasks((prev) =>
+              prev.map((t) =>
+                t.id === tempId
+                  ? { ...created, onCalendar: created.onCalendar !== undefined ? created.onCalendar : t.onCalendar }
+                  : t
+              )
+            );
             if (created.reminders?.length) {
               scheduleReminderNotifications(created.id, created.title, created.reminders).catch(() => {});
             }
@@ -225,6 +235,8 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
           locationReminder,
           reminders: sortedReminders,
           subtasks: subtasks?.length ? subtasks : undefined,
+          itemType,
+          onCalendar,
         };
         setTasks((prev) => [newTask, ...prev]);
       }
